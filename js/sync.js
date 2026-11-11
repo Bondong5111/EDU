@@ -261,8 +261,8 @@ function updateSyncBadge() {
     else if (Cloud.status === 'error') [icon, text] = ['⚠️', '동기화 오류'];
     else [icon, text] = ['☁️', '동기화됨'];
   }
-  el.textContent = icon;
-  el.title = text;
+  el.innerHTML = `<i aria-hidden="true"></i><span>${text}</span>`;
+  el.title = `${icon} ${text}`;
   el.dataset.state = Cloud.mode === 'server' ? Cloud.status : Cloud.mode;
 }
 

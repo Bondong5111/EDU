@@ -92,7 +92,19 @@ function toast(msg) {
 /* =========================================================
  * 탭 전환
  * ========================================================= */
+const PAGES = {
+  dashboard: ['홈', () => fmtDate(todayStr())],
+  me: ['나', () => '나를 소개하고, 나를 이해하기'],
+  care: ['자기관리', () => '습관 · 컨디션 · 목표'],
+  schedule: ['일정', () => '달력과 할 일'],
+  stocks: ['주식', () => '포트폴리오와 매매 기록'],
+  settings: ['설정', () => '연동 · 백업'],
+};
 function showView(name) {
+  const [title, sub] = PAGES[name] || PAGES.dashboard;
+  $('#page-title').textContent = title;
+  $('#page-sub').textContent = sub();
+  window.scrollTo(0, 0);
   document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + name));
   location.hash = name;
@@ -434,7 +446,7 @@ $('#watch-list').addEventListener('click', (ev) => {
 /* =========================================================
  * 대시보드
  * ========================================================= */
-const PIE_COLORS = ['#3b6ef5', '#2fa36b', '#e08a1e', '#8a63d2', '#d93a3a', '#1fa3b8', '#c2549b', '#7a8599'];
+const PIE_COLORS = ['#4f6bed', '#12a150', '#f59e0b', '#8b5cf6', '#e5484d', '#06b6d4', '#ec4899', '#94a3b8'];
 
 function drawPie(canvas, items) {
   const ctx = canvas.getContext('2d');
@@ -481,6 +493,10 @@ function ageOf(birth) {
 const interestsOf = (p) => p.interests.split(',').map((s) => s.trim()).filter(Boolean);
 const getSaju = () => (state.profile.birth ? Saju.calculate(state.profile.birth, state.profile.birthTime) : null);
 
+function greeting() {
+  const h = new Date().getHours();
+  return h < 5 ? '늦은 밤이에요 🌙' : h < 11 ? '좋은 아침이에요 ☀️' : h < 17 ? '좋은 오후예요 🌤️' : h < 21 ? '수고한 하루예요 🌇' : '편안한 밤 되세요 🌙';
+}
 function heroHtml({ compact = false } = {}) {
   const p = state.profile, saju = getSaju(), age = ageOf(p.birth);
   const tags = [
@@ -492,7 +508,8 @@ function heroHtml({ compact = false } = {}) {
   ].filter(Boolean).join('');
   return `<div class="avatar">${esc(p.emoji || '🌱')}</div>
     <div class="grow">
-      <h2>${p.name ? esc(p.name) : '나를 소개해 주세요'}</h2>
+      ${compact ? `<div class="greeting">${greeting()}</div>` : ''}
+      <h2>${p.name ? esc(p.name) + (compact ? '님' : '') : '나를 소개해 주세요'}</h2>
       <div class="headline">${p.headline ? esc(p.headline) : (compact ? '‘나’ 탭에서 프로필을 작성하면 여기에 표시됩니다.' : '한 줄 소개가 아직 없어요.')}</div>
       <div class="tags">${tags}</div>
       ${p.motto ? `<div class="quote">“${esc(p.motto)}”</div>` : ''}
@@ -905,4 +922,4 @@ $('#lg-date').value = todayStr();
 loadLogForm();
 const initial = location.hash.slice(1);
 if (['dashboard', 'me', 'care', 'schedule', 'stocks', 'settings'].includes(initial)) showView(initial);
-else render();
+else showView('dashboard');
