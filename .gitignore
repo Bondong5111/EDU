@@ -1,0 +1,5 @@
+# 서버 데이터·비밀값 (절대 커밋 금지)
+server/data/
+server/.env
+*.tmp
+node_modules/

@@ -21,7 +21,8 @@ const defaultState = () => ({
   prices: {},        // symbol -> 현재가
   targets: {},       // symbol -> 목표가
   watchlist: [],     // {id, symbol}
-  settings: { currency: 'KRW', usdKrw: 1400, googleClientId: '', googleCalendarId: 'primary' },
+  settings: { currency: 'KRW', usdKrw: 1400, googleCalendarId: 'primary' },
+  meta: {},          // 연동 시각 등 {tossAt, gcalAt, samsungAt}
   toss: null,        // 토스증권에서 불러온 보유 주식 스냅샷 {items, usdKrw, fetchedAt, accountSeq}
 });
 

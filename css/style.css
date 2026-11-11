@@ -30,6 +30,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
@@ -253,3 +254,29 @@ select.auto { width: auto; }
 .src-badge.g { background: #4285f4; }
 .src-badge.t { background: #3182f6; }
 code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+
+/* ===== 통합: 동기화 · 로그인 · 연결 현황 ===== */
+.logo { display: flex; align-items: center; gap: 6px; }
+.sync-badge { border: 0; background: var(--bg); border-radius: 999px; font-size: 13px; padding: 2px 8px; cursor: pointer; line-height: 1.4; }
+.sync-badge[data-state="offline"], .sync-badge[data-state="error"] { background: #fde8e8; }
+.login { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: grid; place-items: center; padding: 16px; }
+.login-card { width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 12px; text-align: center; }
+.login-logo { font-size: 44px; }
+.login-card h2 { margin: 0; }
+.conn-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+@media (max-width: 860px) { .conn-row { grid-template-columns: repeat(2, 1fr); } }
+.conn-chip { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; text-align: left;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; cursor: pointer; font: inherit; color: inherit; min-width: 0; }
+.conn-chip > span:first-child { grid-row: span 2; font-size: 20px; }
+.conn-chip .conn-name { font-size: 13px; font-weight: 600; }
+.conn-chip .conn-text { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conn-chip.ok { border-color: var(--c-personal); }
+.conn-chip.ok .conn-name::after { content: ' ●'; color: var(--c-personal); font-size: 10px; }
+.integ-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.integ-row:last-of-type { border-bottom: 0; }
+.integ-icon { font-size: 22px; }
+.integ-row .grow { flex: 1; min-width: 160px; }
+.integ-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.dot-status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--line); vertical-align: middle; }
+.dot-status.ok { background: var(--c-personal); }
+.row > label.file-btn { flex: 0 0 auto; min-width: 0; display: inline-flex; flex-direction: row; align-items: center; color: var(--primary); font-size: 14px; }
