@@ -59,3 +59,7 @@ node --env-file=server/.env server/server.mjs
 
 - 통합 서버: 서버의 `server/data/db.json`에 저장되고 1시간마다 백업. 각 기기에는 오프라인용 사본만 남음 (로그아웃 시 삭제)
 - 서버 없이: 브라우저 `localStorage`에만 저장. 설정 탭에서 JSON으로 내보내기·가져오기
+
+## 서체
+
+[Pretendard](https://github.com/orioncactus/pretendard) (SIL Open Font License 1.1)를 `fonts/pretendard/`에 포함했습니다. 화면에 필요한 글자 조각만 내려받는 동적 서브셋 방식이라 가볍고, 오프라인에서도 동작합니다.

@@ -102,9 +102,9 @@ async function readJson(req, limit = 8 * 1024 * 1024) {
 }
 
 /* ---------- 정적 파일 (허용 목록만) ---------- */
-const STATIC = /^\/(index\.html|manifest\.webmanifest|sw\.js|(css|js|icons)\/[\w.-]+)$/;
+const STATIC = /^\/(index\.html|manifest\.webmanifest|sw\.js|(css|js|icons)\/[\w.-]+|fonts\/[\w-]+\/(woff2-dynamic-subset\/)?[\w.-]+\.(css|woff2|txt))$/;
 const TYPES = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
-  '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png' };
+  '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8' };
 async function serveStatic(req, res, pathname) {
   if (pathname === '/') pathname = '/index.html';
   if (!STATIC.test(pathname)) return false;

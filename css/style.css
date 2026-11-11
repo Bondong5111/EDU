@@ -33,7 +33,7 @@
   --hero-from: #4f6bed;
   --hero-to: #7c5cf0;
   color-scheme: light dark;
-  --font: -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", Roboto, sans-serif;
+  --font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", Roboto, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -70,8 +70,8 @@ body {
   margin: 0;
   font-family: var(--font);
   font-size: 15px;
-  line-height: 1.5;
-  letter-spacing: -0.01em;
+  line-height: 1.55;
+  letter-spacing: -0.004em;
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
@@ -453,3 +453,9 @@ input[type=range] { padding: 0; border: 0; min-height: 0; background: none; box-
 #dash-stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 #dash-stats .value { white-space: nowrap; overflow-wrap: normal; }
 .brand-mark, .login-logo { background: linear-gradient(135deg, var(--hero-from), var(--hero-to)); }
+
+/* 서체: Pretendard — 제목은 촘촘하게, 작은 글씨는 기본 자간 */
+h1, h2, h3, .brand, .hero h2, .stat .value, .cal-head h2 { letter-spacing: -0.025em; }
+.page-head h1 { font-weight: 750; letter-spacing: -0.04em; }
+.muted, .sub, .stat .label, .table th, .tag, .conn-text, .legend, .notice, label { letter-spacing: 0; }
+.tab { letter-spacing: -0.01em; }
