@@ -3,14 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>마이 플래너 · 일정 & 주식</title>
+  <title>MY LIFE · 나를 관리하는 플랫폼</title>
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
   <header class="topbar">
-    <h1 class="logo">📅📈 마이 플래너</h1>
+    <h1 class="logo"><span id="logo-emoji">🌱</span> MY LIFE</h1>
     <nav class="tabs" role="tablist">
-      <button class="tab active" data-view="dashboard">대시보드</button>
+      <button class="tab active" data-view="dashboard">홈</button>
+      <button class="tab" data-view="me">나</button>
+      <button class="tab" data-view="care">자기관리</button>
       <button class="tab" data-view="schedule">일정</button>
       <button class="tab" data-view="stocks">주식</button>
       <button class="tab" data-view="settings">설정</button>
@@ -18,9 +20,15 @@
   </header>
 
   <main>
-    <!-- 대시보드 -->
+    <!-- ================= 홈 대시보드 ================= -->
     <section id="view-dashboard" class="view active">
-      <div class="grid-2">
+      <div class="card hero" id="dash-hero"></div>
+
+      <div class="grid-3">
+        <div class="card">
+          <div class="card-head"><h2>오늘의 습관</h2><span id="dash-habit-rate" class="muted"></span></div>
+          <ul id="dash-habits" class="list"></ul>
+        </div>
         <div class="card">
           <h2>오늘의 일정 <span id="dash-today" class="muted"></span></h2>
           <ul id="dash-events" class="list"></ul>
@@ -28,15 +36,170 @@
           <ul id="dash-upcoming" class="list"></ul>
         </div>
         <div class="card">
+          <h2>최근 7일 컨디션</h2>
+          <div id="dash-condition" class="stats compact"></div>
+          <div class="row">
+            <button class="btn ghost small" data-goto="care">오늘 기록하기 →</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h2>목표 진행률</h2>
+          <ul id="dash-goals" class="list"></ul>
+        </div>
+        <div class="card">
           <h2>포트폴리오 요약</h2>
-          <div class="stats" id="dash-stats"></div>
-          <canvas id="dash-pie" width="260" height="260"></canvas>
-          <div id="dash-legend" class="legend"></div>
+          <div class="stats compact" id="dash-stats"></div>
+          <div class="pie-wrap">
+            <canvas id="dash-pie" width="200" height="200"></canvas>
+            <div id="dash-legend" class="legend"></div>
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- 일정 -->
+    <!-- ================= 나 ================= -->
+    <section id="view-me" class="view">
+      <div class="card" id="profile-view"></div>
+
+      <div class="card" id="profile-edit" hidden>
+        <h2>프로필 편집</h2>
+        <form id="profile-form" class="form">
+          <div class="row">
+            <label class="narrow">아이콘<input id="pf-emoji" maxlength="4" placeholder="🌱" /></label>
+            <label>이름<input id="pf-name" maxlength="30" /></label>
+            <label>MBTI<input id="pf-mbti" maxlength="4" placeholder="예: ENFP" /></label>
+          </div>
+          <label>한 줄 소개<input id="pf-headline" maxlength="80" placeholder="예: 매일 1% 성장하는 개발자" /></label>
+          <label>자기소개<textarea id="pf-about" rows="4" placeholder="나는 어떤 사람인지, 무엇을 좋아하고 어디로 가고 싶은지"></textarea></label>
+          <div class="row">
+            <label>생년월일<input type="date" id="pf-birth" /></label>
+            <label>태어난 시각 <span class="muted">(모르면 비워두기)</span><input type="time" id="pf-birthtime" /></label>
+            <label>성별
+              <select id="pf-gender"><option value="">선택 안 함</option><option value="F">여성</option><option value="M">남성</option></select>
+            </label>
+          </div>
+          <label>좌우명 / 핵심 가치<input id="pf-motto" maxlength="120" /></label>
+          <label>관심사 <span class="muted">(쉼표로 구분)</span><input id="pf-interests" placeholder="독서, 러닝, 투자, 여행" /></label>
+          <label>나의 비전 (5년 후의 나)<textarea id="pf-vision" rows="2"></textarea></label>
+          <div class="row">
+            <button type="submit" class="btn">저장</button>
+            <button type="button" id="pf-cancel" class="btn ghost">취소</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h2>💪 나의 강점</h2>
+          <ul id="strength-list" class="list"></ul>
+          <form id="strength-form" class="form">
+            <div class="row">
+              <input id="st-title" placeholder="강점 (예: 끈기)" maxlength="40" required />
+              <select id="st-kind" class="auto">
+                <option value="strength">강점</option>
+                <option value="grow">보완점</option>
+              </select>
+            </div>
+            <input id="st-desc" placeholder="근거나 사례 (예: 3년째 매일 운동 중)" maxlength="200" />
+            <button class="btn small" type="submit">추가</button>
+          </form>
+          <h3>🌱 보완하고 싶은 점</h3>
+          <ul id="grow-list" class="list"></ul>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>🔮 나의 사주</h2><span class="muted">재미·참고용</span></div>
+          <div id="saju-box"></div>
+          <label class="mt">나만의 사주 메모 <span class="muted">(상담받은 내용, 느낀 점 등)</span>
+            <textarea id="saju-note" rows="3"></textarea>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 자기관리 ================= -->
+    <section id="view-care" class="view">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h2>✅ 습관 트래커</h2><span class="muted">최근 7일</span></div>
+          <div class="table-wrap"><table class="table habit-table" id="habit-table"></table></div>
+          <form id="habit-form" class="form row">
+            <input id="hb-icon" class="narrow-input" maxlength="4" placeholder="🏃" />
+            <input id="hb-name" placeholder="새 습관 (예: 물 2L 마시기)" maxlength="40" required />
+            <button class="btn" type="submit">추가</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>📝 오늘의 기록</h2>
+          <form id="log-form" class="form">
+            <div class="row">
+              <label>날짜<input type="date" id="lg-date" required /></label>
+              <label>기분
+                <select id="lg-mood">
+                  <option value="5">😄 최고</option><option value="4">🙂 좋음</option><option value="3" selected>😐 보통</option>
+                  <option value="2">😕 별로</option><option value="1">😣 힘듦</option>
+                </select>
+              </label>
+              <label>에너지
+                <select id="lg-energy">
+                  <option value="5">⚡ 5</option><option value="4">4</option><option value="3" selected>3</option><option value="2">2</option><option value="1">🪫 1</option>
+                </select>
+              </label>
+            </div>
+            <div class="row">
+              <label>수면(시간)<input type="number" id="lg-sleep" min="0" max="24" step="0.5" /></label>
+              <label>운동(분)<input type="number" id="lg-exercise" min="0" step="5" /></label>
+              <label>체중(kg)<input type="number" id="lg-weight" min="0" step="0.1" /></label>
+            </div>
+            <label>감사한 일 / 잘한 일<input id="lg-grateful" maxlength="200" /></label>
+            <label>회고 · 일기<textarea id="lg-note" rows="3"></textarea></label>
+            <button class="btn" type="submit">저장</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>📈 컨디션 추이 <span class="muted">최근 14일</span></h2>
+          <div class="legend">
+            <span><span class="dot" style="background:var(--c-work)"></span>기분</span>
+            <span><span class="dot" style="background:var(--c-personal)"></span>에너지</span>
+            <span><span class="dot" style="background:var(--c-etc)"></span>수면(÷2)</span>
+          </div>
+        </div>
+        <div id="trend-chart"></div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h2>🎯 목표</h2>
+          <ul id="goal-list" class="list"></ul>
+          <form id="goal-form" class="form">
+            <input id="gl-title" placeholder="목표 (예: 하프 마라톤 완주)" maxlength="60" required />
+            <div class="row">
+              <label>분야
+                <select id="gl-area">
+                  <option value="health">건강</option><option value="career">커리어</option><option value="money">재테크</option>
+                  <option value="study">배움</option><option value="relation">관계</option><option value="mind">마음</option>
+                </select>
+              </label>
+              <label>기한<input type="date" id="gl-due" /></label>
+            </div>
+            <button class="btn small" type="submit">목표 추가</button>
+          </form>
+        </div>
+        <div class="card">
+          <h2>📚 기록 모아보기</h2>
+          <ul id="log-list" class="list scroll"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 일정 ================= -->
     <section id="view-schedule" class="view">
       <div class="grid-sched">
         <div class="card">
@@ -84,7 +247,7 @@
       </div>
     </section>
 
-    <!-- 주식 -->
+    <!-- ================= 주식 ================= -->
     <section id="view-stocks" class="view">
       <div class="card">
         <div class="stats" id="pf-stats"></div>
@@ -150,7 +313,7 @@
       </div>
     </section>
 
-    <!-- 설정 -->
+    <!-- ================= 설정 ================= -->
     <section id="view-settings" class="view">
       <div class="card">
         <h2>설정</h2>
@@ -166,7 +329,7 @@
       </div>
       <div class="card">
         <h2>데이터 백업</h2>
-        <p class="muted">데이터는 이 브라우저(localStorage)에 저장됩니다. 다른 기기로 옮기려면 백업 파일을 내보내고 가져오세요.</p>
+        <p class="muted">모든 데이터는 이 브라우저(localStorage)에만 저장됩니다. 다른 기기로 옮기거나 안전하게 보관하려면 백업 파일을 내보내세요.</p>
         <div class="row">
           <button id="export-btn" class="btn">내보내기 (JSON)</button>
           <label class="btn ghost file-btn">가져오기<input type="file" id="import-file" accept="application/json" hidden /></label>
@@ -177,6 +340,7 @@
   </main>
 
   <div id="toast" class="toast" hidden></div>
+  <script src="js/saju.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
