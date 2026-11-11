@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>마이 플래너 · 일정 & 주식</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1 class="logo">📅📈 마이 플래너</h1>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-view="dashboard">대시보드</button>
+      <button class="tab" data-view="schedule">일정</button>
+      <button class="tab" data-view="stocks">주식</button>
+      <button class="tab" data-view="settings">설정</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- 대시보드 -->
+    <section id="view-dashboard" class="view active">
+      <div class="grid-2">
+        <div class="card">
+          <h2>오늘의 일정 <span id="dash-today" class="muted"></span></h2>
+          <ul id="dash-events" class="list"></ul>
+          <h3>다가오는 일정 (7일)</h3>
+          <ul id="dash-upcoming" class="list"></ul>
+        </div>
+        <div class="card">
+          <h2>포트폴리오 요약</h2>
+          <div class="stats" id="dash-stats"></div>
+          <canvas id="dash-pie" width="260" height="260"></canvas>
+          <div id="dash-legend" class="legend"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 일정 -->
+    <section id="view-schedule" class="view">
+      <div class="grid-sched">
+        <div class="card">
+          <div class="cal-head">
+            <button id="cal-prev" class="btn ghost">◀</button>
+            <h2 id="cal-title"></h2>
+            <button id="cal-next" class="btn ghost">▶</button>
+            <button id="cal-today" class="btn ghost small">오늘</button>
+          </div>
+          <div class="cal-grid cal-weekdays">
+            <div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div>
+          </div>
+          <div id="cal-grid" class="cal-grid"></div>
+        </div>
+        <div class="card">
+          <h2 id="day-title"></h2>
+          <ul id="day-events" class="list"></ul>
+          <form id="event-form" class="form">
+            <h3 id="event-form-title">일정 추가</h3>
+            <input type="hidden" id="ev-id" />
+            <label>제목<input id="ev-title" required maxlength="100" /></label>
+            <div class="row">
+              <label>날짜<input type="date" id="ev-date" required /></label>
+              <label>시작<input type="time" id="ev-start" /></label>
+              <label>종료<input type="time" id="ev-end" /></label>
+            </div>
+            <div class="row">
+              <label>분류
+                <select id="ev-cat">
+                  <option value="work">업무</option>
+                  <option value="personal">개인</option>
+                  <option value="finance">투자/금융</option>
+                  <option value="etc">기타</option>
+                </select>
+              </label>
+              <label class="check"><input type="checkbox" id="ev-done" /> 완료</label>
+            </div>
+            <label>메모<textarea id="ev-memo" rows="2"></textarea></label>
+            <div class="row">
+              <button type="submit" class="btn">저장</button>
+              <button type="button" id="ev-cancel" class="btn ghost">취소</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- 주식 -->
+    <section id="view-stocks" class="view">
+      <div class="card">
+        <div class="stats" id="pf-stats"></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h2>보유 종목</h2>
+          <button id="refresh-prices" class="btn ghost small">현재가 일괄 수정</button>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>종목</th><th>수량</th><th>평균단가</th><th>현재가</th>
+                <th>평가금액</th><th>손익</th><th>수익률</th><th>목표가</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="holdings-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h2>매매 기록 추가</h2>
+          <form id="trade-form" class="form">
+            <div class="row">
+              <label>종목명/티커<input id="tr-symbol" required maxlength="30" placeholder="예: 삼성전자, AAPL" list="symbol-list" /></label>
+              <label>구분
+                <select id="tr-type"><option value="buy">매수</option><option value="sell">매도</option></select>
+              </label>
+            </div>
+            <div class="row">
+              <label>수량<input type="number" id="tr-qty" min="0" step="any" required /></label>
+              <label>단가<input type="number" id="tr-price" min="0" step="any" required /></label>
+              <label>날짜<input type="date" id="tr-date" required /></label>
+            </div>
+            <label>메모<input id="tr-memo" maxlength="200" /></label>
+            <button type="submit" class="btn">기록</button>
+          </form>
+          <datalist id="symbol-list"></datalist>
+        </div>
+        <div class="card">
+          <h2>관심 종목</h2>
+          <form id="watch-form" class="form row">
+            <input id="w-symbol" placeholder="종목명" required maxlength="30" />
+            <input id="w-target" type="number" step="any" min="0" placeholder="목표가" />
+            <input id="w-price" type="number" step="any" min="0" placeholder="현재가" />
+            <button class="btn" type="submit">추가</button>
+          </form>
+          <ul id="watch-list" class="list"></ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>매매 내역</h2>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>날짜</th><th>종목</th><th>구분</th><th>수량</th><th>단가</th><th>금액</th><th>메모</th><th></th></tr></thead>
+            <tbody id="trades-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 설정 -->
+    <section id="view-settings" class="view">
+      <div class="card">
+        <h2>설정</h2>
+        <form id="settings-form" class="form">
+          <label>통화 표시
+            <select id="set-currency">
+              <option value="KRW">원 (₩)</option>
+              <option value="USD">달러 ($)</option>
+            </select>
+          </label>
+          <button class="btn" type="submit">저장</button>
+        </form>
+      </div>
+      <div class="card">
+        <h2>데이터 백업</h2>
+        <p class="muted">데이터는 이 브라우저(localStorage)에 저장됩니다. 다른 기기로 옮기려면 백업 파일을 내보내고 가져오세요.</p>
+        <div class="row">
+          <button id="export-btn" class="btn">내보내기 (JSON)</button>
+          <label class="btn ghost file-btn">가져오기<input type="file" id="import-file" accept="application/json" hidden /></label>
+          <button id="reset-btn" class="btn danger">전체 초기화</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="js/app.js"></script>
+</body>
+</html>
