@@ -154,12 +154,22 @@
               <label>수면(시간)<input type="number" id="lg-sleep" min="0" max="24" step="0.5" /></label>
               <label>운동(분)<input type="number" id="lg-exercise" min="0" step="5" /></label>
               <label>체중(kg)<input type="number" id="lg-weight" min="0" step="0.1" /></label>
+              <label>걸음 수<input type="number" id="lg-steps" min="0" step="1" /></label>
             </div>
             <label>감사한 일 / 잘한 일<input id="lg-grateful" maxlength="200" /></label>
             <label>회고 · 일기<textarea id="lg-note" rows="3"></textarea></label>
             <button class="btn" type="submit">저장</button>
           </form>
         </div>
+      </div>
+
+      <div class="card integ-bar">
+        <div class="grow">
+          <strong>삼성헬스 가져오기</strong>
+          <div class="sub">삼성헬스 앱 → 설정 → <em>개인 데이터 다운로드</em>로 받은 폴더의 CSV 파일들을 선택하세요. 수면·걸음 수·운동·체중을 날짜별 기록에 채워 넣습니다 (기분·일기는 그대로 유지).</div>
+          <div class="sub" id="sh-result"></div>
+        </div>
+        <label class="btn small file-btn">CSV 선택<input type="file" id="sh-files" accept=".csv,text/csv" multiple hidden /></label>
       </div>
 
       <div class="card">
@@ -209,6 +219,12 @@
             <button id="cal-next" class="btn ghost">▶</button>
             <button id="cal-today" class="btn ghost small">오늘</button>
           </div>
+          <div class="integ-bar slim">
+            <span class="src-badge g">G</span>
+            <span class="grow sub" id="gcal-status">구글 캘린더 미연결</span>
+            <button id="gcal-connect" class="btn ghost small">연결</button>
+            <button id="gcal-sync" class="btn small" hidden>가져오기</button>
+          </div>
           <div class="cal-grid cal-weekdays">
             <div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div>
           </div>
@@ -236,6 +252,7 @@
                 </select>
               </label>
               <label class="check"><input type="checkbox" id="ev-done" /> 완료</label>
+              <label class="check" id="ev-gcal-wrap" hidden><input type="checkbox" id="ev-gcal" /> 구글 캘린더에도 추가</label>
             </div>
             <label>메모<textarea id="ev-memo" rows="2"></textarea></label>
             <div class="row">
@@ -249,6 +266,14 @@
 
     <!-- ================= 주식 ================= -->
     <section id="view-stocks" class="view">
+      <div class="card integ-bar">
+        <div class="grow">
+          <strong>토스증권 연동</strong>
+          <div class="sub" id="toss-status">설정 탭에서 중계 서버를 등록하면 보유 주식을 자동으로 불러옵니다.</div>
+        </div>
+        <button id="toss-sync" class="btn small">토스에서 불러오기</button>
+        <button id="toss-clear" class="btn ghost small" hidden>연동 데이터 지우기</button>
+      </div>
       <div class="card">
         <div class="stats" id="pf-stats"></div>
       </div>
@@ -328,6 +353,28 @@
         </form>
       </div>
       <div class="card">
+        <h2>연동</h2>
+        <form id="integ-form" class="form">
+          <h3>토스증권 (조회 전용 중계 서버)</h3>
+          <p class="muted">고정 IP가 있는 PC·서버에서 <code>server/toss-proxy.mjs</code>를 실행한 뒤 주소와 PROXY_TOKEN을 입력하세요. 토큰은 이 브라우저에만 저장되며 백업 파일에 포함되지 않습니다.</p>
+          <div class="row">
+            <label>중계 서버 주소<input id="set-toss-url" type="url" placeholder="https://toss.내도메인.com" /></label>
+            <label>PROXY_TOKEN<input id="set-toss-token" type="password" autocomplete="off" /></label>
+          </div>
+          <label>환율 (USD→KRW, 토스에서 못 받아올 때 사용)<input id="set-usdkrw" type="number" min="0" step="0.1" /></label>
+          <h3>구글 캘린더</h3>
+          <p class="muted">Google Cloud 콘솔에서 만든 OAuth 클라이언트 ID(웹 애플리케이션)를 입력하세요. 승인된 자바스크립트 원본에 이 사이트 주소를 등록해야 합니다.</p>
+          <div class="row">
+            <label>OAuth 클라이언트 ID<input id="set-gclient" placeholder="xxxx.apps.googleusercontent.com" /></label>
+            <label>캘린더 ID<input id="set-gcal-id" placeholder="primary" /></label>
+          </div>
+          <div class="row">
+            <button class="btn" type="submit">연동 설정 저장</button>
+            <button class="btn ghost" type="button" id="toss-test">토스 연결 테스트</button>
+          </div>
+        </form>
+      </div>
+      <div class="card">
         <h2>데이터 백업</h2>
         <p class="muted">모든 데이터는 이 브라우저(localStorage)에만 저장됩니다. 다른 기기로 옮기거나 안전하게 보관하려면 백업 파일을 내보내세요.</p>
         <div class="row">
@@ -342,5 +389,6 @@
   <div id="toast" class="toast" hidden></div>
   <script src="js/saju.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/integrations.js"></script>
 </body>
 </html>

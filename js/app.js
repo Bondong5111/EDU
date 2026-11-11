@@ -21,12 +21,14 @@ const defaultState = () => ({
   prices: {},        // symbol -> 현재가
   targets: {},       // symbol -> 목표가
   watchlist: [],     // {id, symbol}
-  settings: { currency: 'KRW' },
+  settings: { currency: 'KRW', usdKrw: 1400, googleClientId: '', googleCalendarId: 'primary' },
+  toss: null,        // 토스증권에서 불러온 보유 주식 스냅샷 {items, usdKrw, fetchedAt, accountSeq}
 });
 
 function mergeState(data) {
   const s = Object.assign(defaultState(), data);
   s.profile = Object.assign(defaultProfile(), data.profile);
+  s.settings = Object.assign(defaultState().settings, data.settings);
   return s;
 }
 function loadState() {
@@ -139,10 +141,12 @@ function eventItem(e, { showDate = false, editable = true } = {}) {
     <input type="checkbox" class="ev-toggle" ${e.done ? 'checked' : ''} title="완료" />
     <span class="dot cat-${esc(e.cat)}"></span>
     <div class="grow">
-      <div class="ev-name">${esc(e.title)}</div>
+      <div class="ev-name">${e.source === 'google' ? '<span class="src-badge g" title="구글 캘린더">G</span>' : ''}${esc(e.title)}</div>
       <div class="sub">${showDate ? fmtDate(e.date) + ' · ' : ''}${timeRange(e)} · ${CAT_LABEL[e.cat] || '기타'}${e.memo ? ' · ' + esc(e.memo) : ''}</div>
     </div>
-    ${editable ? '<button class="icon-btn ev-edit" title="수정">✏️</button><button class="icon-btn ev-del" title="삭제">🗑️</button>' : ''}
+    ${!editable ? '' : e.source === 'google'
+      ? (e.link ? `<a class="icon-btn" href="${esc(e.link)}" target="_blank" rel="noopener" title="구글 캘린더에서 열기">↗</a>` : '')
+      : '<button class="icon-btn ev-edit" title="수정">✏️</button><button class="icon-btn ev-del" title="삭제">🗑️</button>'}
   </li>`;
 }
 
@@ -252,10 +256,37 @@ function computeHoldings() {
       const pnl = value - h.cost;
       return { ...h, avg, price, value, pnl, rate: h.cost ? (pnl / h.cost) * 100 : 0, target: state.targets[h.symbol] };
     })
+    .concat(tossHoldings())
     .sort((a, b) => b.value - a.value);
   const cost = holdings.reduce((s, h) => s + h.cost, 0);
   const value = holdings.reduce((s, h) => s + h.value, 0);
   return { holdings, cost, value, pnl: value - cost, rate: cost ? ((value - cost) / cost) * 100 : 0, realized };
+}
+
+// 토스증권 스냅샷 → 표시 통화로 환산한 보유 종목
+function tossHoldings() {
+  const t = state.toss;
+  if (!t || !Array.isArray(t.items)) return [];
+  const fx = Number(t.usdKrw) || Number(state.settings.usdKrw) || 0;
+  const display = state.settings.currency;
+  const conv = (v, cur) => {
+    v = Number(v) || 0;
+    if (cur === display || !fx) return v;
+    return display === 'KRW' ? v * fx : v / fx;
+  };
+  return t.items.map((it) => {
+    const key = 'toss:' + it.symbol;
+    const qty = Number(it.quantity) || 0;
+    const cost = conv(it.marketValue?.purchaseAmount ?? qty * it.averagePurchasePrice, it.currency);
+    const value = conv(it.marketValue?.amount ?? qty * it.lastPrice, it.currency);
+    const pnl = value - cost;
+    return {
+      key, source: 'toss', symbol: it.name || it.symbol, code: it.symbol, currency: it.currency, qty,
+      avg: conv(it.averagePurchasePrice, it.currency), price: conv(it.lastPrice, it.currency),
+      cost, value, pnl, rate: cost ? (pnl / cost) * 100 : 0, target: state.targets[key],
+      daily: it.dailyProfitLoss ? Number(it.dailyProfitLoss.rate) * 100 : null,
+    };
+  });
 }
 
 function statsHtml(p) {
@@ -272,16 +303,16 @@ function renderStocks() {
   $('#pf-stats').innerHTML = statsHtml(p);
 
   $('#holdings-body').innerHTML = p.holdings.length ? p.holdings.map((h) => `
-    <tr data-sym="${esc(h.symbol)}">
-      <td><strong>${esc(h.symbol)}</strong>${h.target && h.price >= h.target ? '<span class="badge hit">목표 도달</span>' : ''}</td>
+    <tr data-sym="${esc(h.key || h.symbol)}">
+      <td>${h.source === 'toss' ? '<span class="src-badge t" title="토스증권 연동">토스</span>' : ''}<strong>${esc(h.symbol)}</strong>${h.code ? ` <span class="muted">${esc(h.code)}</span>` : ''}${h.target && h.price >= h.target ? '<span class="badge hit">목표 도달</span>' : ''}${h.daily != null ? `<div class="sub ${cls(h.daily)}">오늘 ${pct(h.daily)}</div>` : ''}</td>
       <td>${h.qty.toLocaleString()}</td>
       <td>${money(h.avg)}</td>
-      <td><input class="inline price-input" type="number" step="any" min="0" value="${+h.price.toFixed(4)}" /></td>
+      <td>${h.source === 'toss' ? money(h.price) : `<input class="inline price-input" type="number" step="any" min="0" value="${+h.price.toFixed(4)}" />`}</td>
       <td>${money(h.value)}</td>
       <td class="${cls(h.pnl)}">${signed(h.pnl)}</td>
       <td class="${cls(h.rate)}">${pct(h.rate)}</td>
       <td><input class="inline target-input" type="number" step="any" min="0" value="${h.target ?? ''}" placeholder="-" /></td>
-      <td><button class="icon-btn quick-sell" title="전량 매도 기록">매도</button></td>
+      <td>${h.source === 'toss' ? '' : '<button class="icon-btn quick-sell" title="전량 매도 기록">매도</button>'}</td>
     </tr>`).join('') : '<tr><td colspan="9" class="empty">보유 종목이 없습니다. 아래에서 매수 기록을 추가해 보세요.</td></tr>';
 
   const trades = [...state.trades].sort((a, b) => b.date.localeCompare(a.date));
@@ -324,7 +355,7 @@ $('#trade-form').addEventListener('submit', (ev) => {
   };
   if (!t.symbol || !(t.qty > 0) || !(t.price >= 0) || !t.date) { toast('입력값을 확인하세요'); return; }
   if (t.type === 'sell') {
-    const h = computeHoldings().holdings.find((x) => x.symbol === t.symbol);
+    const h = computeHoldings().holdings.find((x) => x.symbol === t.symbol && x.source !== 'toss');
     if (!h || h.qty < t.qty - 1e-9) { toast(`보유 수량(${h ? h.qty : 0})보다 많이 매도할 수 없습니다`); return; }
   }
   state.trades.push(t);
@@ -349,7 +380,7 @@ $('#holdings-body').addEventListener('change', (ev) => {
 $('#holdings-body').addEventListener('click', (ev) => {
   if (!ev.target.classList.contains('quick-sell')) return;
   const sym = ev.target.closest('tr').dataset.sym;
-  const h = computeHoldings().holdings.find((x) => x.symbol === sym);
+  const h = computeHoldings().holdings.find((x) => x.symbol === sym && x.source !== 'toss');
   if (!h || !confirm(`${sym} ${h.qty}주를 현재가 ${money(h.price)}에 전량 매도 기록할까요?`)) return;
   state.trades.push({ id: uid(), symbol: sym, type: 'sell', qty: h.qty, price: h.price, date: todayStr(), memo: '전량 매도' });
   save(); render();
@@ -362,8 +393,8 @@ $('#trades-body').addEventListener('click', (ev) => {
   }
 });
 $('#refresh-prices').addEventListener('click', () => {
-  const { holdings } = computeHoldings();
-  if (!holdings.length) { toast('보유 종목이 없습니다'); return; }
+  const holdings = computeHoldings().holdings.filter((h) => h.source !== 'toss');
+  if (!holdings.length) { toast('직접 입력한 보유 종목이 없습니다'); return; }
   for (const h of holdings) {
     const v = prompt(`${h.symbol} 현재가 (취소하면 건너뜀)`, h.price);
     if (v === null) continue;
@@ -647,6 +678,7 @@ function loadLogForm() {
   $('#lg-sleep').value = l.sleep ?? '';
   $('#lg-exercise').value = l.exercise ?? '';
   $('#lg-weight').value = l.weight ?? '';
+  $('#lg-steps').value = l.steps ?? '';
   $('#lg-grateful').value = l.grateful || '';
   $('#lg-note').value = l.note || '';
 }
@@ -657,6 +689,8 @@ $('#log-form').addEventListener('submit', (ev) => {
   const date = $('#lg-date').value;
   if (!date) return;
   state.logs[date] = {
+    ...state.logs[date], // 삼성헬스 등에서 가져온 다른 필드 보존
+    steps: numOrNull($('#lg-steps').value),
     mood: +$('#lg-mood').value, energy: +$('#lg-energy').value,
     sleep: numOrNull($('#lg-sleep').value), exercise: numOrNull($('#lg-exercise').value), weight: numOrNull($('#lg-weight').value),
     grateful: $('#lg-grateful').value.trim(), note: $('#lg-note').value.trim(),
@@ -668,7 +702,7 @@ function renderLogList() {
   const dates = Object.keys(state.logs).sort().reverse();
   $('#log-list').innerHTML = dates.length ? dates.map((d) => {
     const l = state.logs[d];
-    const meta = [l.sleep != null && `수면 ${l.sleep}h`, l.exercise != null && `운동 ${l.exercise}분`, l.weight != null && `${l.weight}kg`, `에너지 ${l.energy}`].filter(Boolean).join(' · ');
+    const meta = [l.sleep != null && `수면 ${l.sleep}h`, l.exercise != null && `운동 ${l.exercise}분`, l.weight != null && `${l.weight}kg`, l.steps != null && `${Number(l.steps).toLocaleString()}보`, l.energy != null && `에너지 ${l.energy}`].filter(Boolean).join(' · ');
     return `<li class="col" data-ldate="${d}">
       <div class="row" style="align-items:center"><strong class="grow">${MOOD_EMOJI[l.mood] || ''} ${fmtDate(d)}</strong>
         <button class="icon-btn lg-edit" title="불러오기">✏️</button><button class="icon-btn lg-del" title="삭제">🗑️</button></div>
@@ -786,7 +820,7 @@ function renderDashboard() {
   // 컨디션
   const week = lastDays(7).map((d) => state.logs[d]).filter(Boolean);
   const avg = (f) => { const v = week.map(f).filter((x) => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
-  const mood = avg((l) => l.mood), sleep = avg((l) => l.sleep), ex = week.reduce((a, l) => a + (l.exercise || 0), 0);
+  const mood = avg((l) => l.mood), sleep = avg((l) => l.sleep), steps = avg((l) => l.steps), ex = week.reduce((a, l) => a + (l.exercise || 0), 0);
   const habitRate = state.habits.length
     ? (lastDays(7).reduce((a, d) => a + state.habits.filter((h) => isChecked(d, h.id)).length, 0) / (state.habits.length * 7)) * 100 : null;
   $('#dash-condition').innerHTML = `
@@ -794,6 +828,7 @@ function renderDashboard() {
     <div class="stat"><div class="label">평균 수면</div><div class="value">${sleep != null ? sleep.toFixed(1) + 'h' : '-'}</div></div>
     <div class="stat"><div class="label">총 운동</div><div class="value">${ex ? ex + '분' : '-'}</div></div>
     <div class="stat"><div class="label">습관 달성률</div><div class="value">${habitRate != null ? Math.round(habitRate) + '%' : '-'}</div></div>
+    <div class="stat"><div class="label">평균 걸음</div><div class="value">${steps != null ? Math.round(steps).toLocaleString() : '-'}</div></div>
     <div class="stat"><div class="label">기록한 날</div><div class="value">${week.length}/7</div></div>`;
 
   // 목표
