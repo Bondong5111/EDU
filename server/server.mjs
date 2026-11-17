@@ -14,6 +14,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { JsonFile } from './lib/store.mjs';
+import { openDb } from './lib/db.mjs';
+import Records from '../js/records.js';
 import { createToss, HttpError } from './lib/toss.mjs';
 import { createGoogle } from './lib/google.mjs';
 
@@ -33,11 +35,26 @@ if (!env.APP_PASSWORD || env.APP_PASSWORD.length < 8) {
 }
 
 /* ---------- 저장소 ---------- */
-const db = new JsonFile(path.join(DATA_DIR, 'db.json'), { rev: 0, data: null, updatedAt: null },
-  { backupDir: path.join(DATA_DIR, 'backups') });
+const db = openDb(path.join(DATA_DIR, 'mylife.db'), { backupDir: path.join(DATA_DIR, 'backups') });
 const secrets = new JsonFile(path.join(DATA_DIR, 'secrets.json'), { sessionKey: null, google: null });
-await db.load();
 await secrets.load();
+
+// 이전 버전(db.json 한 문서)에서 올라온 경우: 기록 단위로 풀어서 옮김
+const legacyFile = path.join(DATA_DIR, 'db.json');
+if (db.isEmpty()) {
+  try {
+    const legacy = JSON.parse(await fs.readFile(legacyFile, 'utf8'));
+    if (legacy?.data) {
+      const flat = Records.flatten(legacy.data);
+      const changes = Object.entries(flat).map(([k, v]) => ({ k, v }));
+      if (changes.length) db.write(changes, Records.info);
+      await fs.rename(legacyFile, legacyFile + '.migrated');
+      console.log(`이전 데이터 ${changes.length}건을 새 데이터베이스로 옮겼습니다.`);
+    }
+  } catch (e) {
+    if (e.code !== 'ENOENT') console.error('이전 데이터 변환 실패:', e.message);
+  }
+}
 if (!secrets.value.sessionKey) await secrets.write({ ...secrets.value, sessionKey: crypto.randomBytes(32).toString('hex') });
 
 const toss = createToss({ clientId: env.TOSS_CLIENT_ID, clientSecret: env.TOSS_CLIENT_SECRET, apiBase: env.TOSS_API_BASE });
@@ -158,24 +175,16 @@ const routes = {
     return { ok: true };
   },
 
-  'GET /api/data': async (req, res, url) => {
-    const v = db.value;
-    if (url.searchParams.get('rev') === String(v.rev)) return { rev: v.rev, unchanged: true };
-    return { rev: v.rev, data: v.data, updatedAt: v.updatedAt };
-  },
-
-  'PUT /api/data': async (req) => {
-    const { baseRev, data } = await readJson(req);
-    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new HttpError(400, '데이터 형식이 올바르지 않습니다.');
-    const cur = db.value;
-    if (baseRev !== cur.rev) {
-      const err = new HttpError(409, '다른 기기에서 먼저 변경되었습니다.');
-      err.payload = { rev: cur.rev, data: cur.data, updatedAt: cur.updatedAt };
-      throw err;
+  // 기록 동기화: 바뀐 줄만 주고받음
+  'POST /api/sync': async (req) => {
+    const { cursor, changes } = await readJson(req);
+    if (!Array.isArray(changes) || changes.length > 100000) throw new HttpError(400, '변경 목록 형식이 올바르지 않습니다.');
+    try {
+      return db.sync(cursor, changes, Records.info);
+    } catch (e) {
+      if (e instanceof RangeError) throw new HttpError(400, e.message);
+      throw e;
     }
-    const next = { rev: cur.rev + 1, data, updatedAt: new Date().toISOString() };
-    await db.write(next);
-    return { rev: next.rev, updatedAt: next.updatedAt };
   },
 
   'GET /api/toss/accounts': async () => {
@@ -197,14 +206,14 @@ const routes = {
     const state = url.searchParams.get('state');
     const exp = pendingOAuth.get(state);
     pendingOAuth.delete(state);
-    if (!exp || exp < Date.now()) return redirect(res, '/?google=error#settings');
-    if (url.searchParams.get('error')) return redirect(res, '/?google=denied#settings');
+    if (!exp || exp < Date.now()) return redirect(res, '/?google=error#me');
+    if (url.searchParams.get('error')) return redirect(res, '/?google=denied#me');
     try {
       await google.exchange(url.searchParams.get('code'));
-      redirect(res, '/?google=connected#schedule');
+      redirect(res, '/?google=connected#records');
     } catch (e) {
       console.error('google callback', e.message);
-      redirect(res, '/?google=error#settings');
+      redirect(res, '/?google=error#me');
     }
   },
   'POST /api/google/disconnect': async () => { await google.disconnect(); return { ok: true }; },
@@ -229,7 +238,7 @@ const server = http.createServer(async (req, res) => {
       // CSRF 방지: 상태를 바꾸는 요청은 커스텀 헤더 필수 (다른 사이트에서는 붙일 수 없음)
       if (req.method !== 'GET' && req.headers['x-mylife'] !== '1') throw new HttpError(403, '잘못된 요청입니다.');
       if (!PUBLIC.has(key) && !isAuthed(req)) throw new HttpError(401, '로그인이 필요합니다.');
-      if (key === 'GET /api/google/callback' && !isAuthed(req)) return redirect(res, '/?google=error#settings');
+      if (key === 'GET /api/google/callback' && !isAuthed(req)) return redirect(res, '/?google=error#me');
       const out = await handler(req, res, url);
       if (!res.headersSent && out !== undefined) json(res, 200, out);
       return;
@@ -245,6 +254,6 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`MY LIFE 서버: http://${HOST}:${PORT}  (공개 주소: ${BASE_URL})`);
-  console.log(`  데이터: ${DATA_DIR}`);
+  console.log(`  데이터: ${DATA_DIR} (기록 ${db.count()}건)`);
   console.log(`  토스증권: ${toss.configured ? '설정됨' : '미설정'} · 구글 캘린더: ${google.configured ? (google.connected() ? '연결됨' : '설정됨(미연결)') : '미설정'}`);
 });

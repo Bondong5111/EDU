@@ -4,12 +4,12 @@
 
 - 🌐 **웹사이트 제공**: 휴대폰·PC 어디서든 같은 주소로 접속, 홈 화면에 앱처럼 설치 가능
 - 🔒 **비밀번호 로그인** (30일 유지, 5회 틀리면 15분 잠금)
-- ☁️ **모든 기기 자동 동기화**: 여러 기기에서 동시에 바꿔도 항목 단위로 자동 병합
-- 💾 **자동 백업**: 1시간마다 `server/data/backups/`에 최근 48개 보관
+- ☁️ **모든 기기 자동 동기화**: 기록 한 건이 한 줄인 데이터베이스에 쌓고, 바뀐 줄만 주고받음
+- 💾 **자동 백업**: 1시간마다 데이터베이스 사본을 `server/data/backups/`에 최근 48개 보관
 - 📈 **토스증권**: 보유 주식·평가손익·환율 자동 갱신 (조회 전용, 주문 기능 없음)
 - 📅 **구글 캘린더**: 한 번 연결하면 계속 유지, 일정 자동 가져오기 + 새 일정 구글에 추가
 
-의존성 설치가 필요 없습니다 (Node.js 18 이상, `--env-file`은 20.6 이상).
+의존성 설치가 필요 없습니다. **Node.js 22.13 이상**이 필요합니다 (내장 SQLite 사용).
 
 ---
 
@@ -44,15 +44,18 @@ cp server/.env.example server/.env
 ## 3. 실행
 
 ```bash
-node --env-file=server/.env server/server.mjs
+npm start
 # → MY LIFE 서버: http://127.0.0.1:8787
 ```
+
+`npm start`는 `node --disable-warning=ExperimentalWarning --env-file=server/.env server/server.mjs`를 실행합니다.
+Node 22에서는 내장 SQLite가 아직 실험 기능으로 표시되어 있어, 시작할 때 나오는 경고 문구를 숨기는 옵션입니다.
 
 항상 켜두려면 pm2를 쓰면 편합니다.
 
 ```bash
 npm i -g pm2
-pm2 start "node --env-file=server/.env server/server.mjs" --name mylife
+pm2 start npm --name mylife -- start
 pm2 save && pm2 startup
 ```
 
@@ -87,7 +90,9 @@ cloudflared tunnel --url http://127.0.0.1:8787
 
 ## 데이터 · 보안
 
-- 데이터: `server/data/db.json` (권한 600), 백업: `server/data/backups/`
+- 데이터: `server/data/mylife.db` (SQLite, 권한 600), 백업: `server/data/backups/` (1시간마다, 최근 48개)
+- 이전 버전의 `db.json`이 있으면 처음 시작할 때 새 데이터베이스로 자동 변환하고 `db.json.migrated`로 이름을 바꿔 둡니다.
+- 복구: 서버를 끄고 백업 파일을 `mylife.db`로 복사한 뒤 다시 켭니다. 각 기기는 로그아웃 후 다시 로그인하세요.
 - 비밀값(세션 서명 키, 구글 refresh token): `server/data/secrets.json`
 - 토스증권 키는 `.env`에만 있고 브라우저로 전달되지 않습니다. 서버는 계좌·보유 주식·환율 **조회**만 호출합니다.
 - 상태를 바꾸는 요청에는 커스텀 헤더가 필요하고(CSRF 방지), 정적 파일은 허용 목록에 있는 것만 제공합니다.

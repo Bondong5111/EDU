@@ -59,7 +59,7 @@ function fromGoogle(item, prev) {
 }
 
 async function syncGoogle({ silent = false } = {}) {
-  if (!gConnected()) { if (!silent) toast(isServer() ? '설정에서 구글 캘린더를 먼저 연결하세요' : LOCAL_ONLY_MSG); return; }
+  if (!gConnected()) { if (!silent) toast(isServer() ? '나 > 연동 · 설정에서 구글 캘린더를 먼저 연결하세요' : LOCAL_ONLY_MSG); return; }
   if (gBusy) return;
   gBusy = true; updateIntegrationUI();
   try {
@@ -227,24 +227,24 @@ function connections() {
   const syncText = { idle: '동기화됨', saving: '저장 중', offline: '오프라인', error: '오류' }[Cloud.status];
   return [
     {
-      id: 'cloud', icon: '☁️', name: '클라우드 동기화',
+      id: 'cloud', icon: 'cloud', name: '클라우드 동기화',
       ok: server && Cloud.status === 'idle' && !Cloud.dirty,
       text: Cloud.mode === 'local' ? '이 기기에만 저장 중' : !Cloud.authed ? '로그인 필요' : `${Cloud.dirty ? '저장 중' : syncText}${Cloud.lastSyncAt ? ' · ' + timeAgo(Cloud.lastSyncAt) : ''}`,
     },
     {
-      id: 'toss', icon: '📈', name: '토스증권',
+      id: 'toss', icon: 'trend', name: '토스증권',
       ok: tossReady() && !!state.toss && !tossError,
       text: !server ? '서버 필요' : !ig.toss?.configured ? '서버에 키 미설정' : tossBusy ? '불러오는 중…' : tossError ? '⚠️ ' + tossError
         : state.toss ? `${state.toss.items.length}종목 · ${timeAgo(state.toss.fetchedAt)}` : '아직 불러오지 않음',
     },
     {
-      id: 'google', icon: '📅', name: '구글 캘린더',
+      id: 'google', icon: 'calendar', name: '구글 캘린더',
       ok: gConnected(),
       text: !server ? '서버 필요' : !ig.google?.configured ? '서버에 OAuth 미설정' : !ig.google?.connected ? '연결 안 됨'
         : gBusy ? '가져오는 중…' : `연결됨${meta().gcalAt ? ' · ' + timeAgo(meta().gcalAt) : ''}`,
     },
     {
-      id: 'samsung', icon: '❤️', name: '삼성헬스',
+      id: 'samsung', icon: 'heart', name: '삼성헬스',
       ok: !!meta().samsungAt,
       text: meta().samsungAt ? `CSV 가져옴 · ${timeAgo(meta().samsungAt)}` : 'CSV로 가져오기',
     },
@@ -255,8 +255,8 @@ function renderDashLinks() {
   const el = $('#dash-links');
   if (!el) return;
   el.innerHTML = connections().map((c) =>
-    `<button class="conn-chip ${c.ok ? 'ok' : ''}" data-goto="settings" title="${esc(c.name)}: ${esc(c.text)}">
-      <span>${c.icon}</span><span class="conn-name">${esc(c.name)}</span><span class="conn-text">${esc(c.text)}</span></button>`).join('');
+    `<button class="conn-chip ${c.ok ? 'ok' : ''}" data-goto="me" data-pane="settings" title="${esc(c.name)}: ${esc(c.text)}">
+      <span>${ico(c.icon)}</span><span class="conn-name">${esc(c.name)}</span><span class="conn-text">${esc(c.text)}</span></button>`).join('');
 }
 
 function renderIntegPanel() {
@@ -270,11 +270,11 @@ function renderIntegPanel() {
     google: !server || !ig.google?.configured ? ''
       : ig.google.connected ? '<button class="btn small" data-act="gsync">지금 가져오기</button><button class="btn ghost small" data-act="gdisconnect">연결 해제</button>'
       : '<button class="btn small" data-act="gconnect">구글 계정 연결</button>',
-    samsung: '<button class="btn ghost small" data-goto="care">CSV 가져오기</button>',
+    samsung: '<label class="btn ghost small" for="sh-files">CSV 가져오기</label>',
   };
   el.innerHTML = connections().map((c) => `
     <div class="integ-row">
-      <span class="integ-icon">${c.icon}</span>
+      <span class="integ-icon">${ico(c.icon)}</span>
       <div class="grow"><strong>${esc(c.name)}</strong> <span class="dot-status ${c.ok ? 'ok' : ''}"></span><div class="sub">${esc(c.text)}</div></div>
       <div class="integ-actions">${actions[c.id]}</div>
     </div>`).join('') +
@@ -316,7 +316,7 @@ function updateIntegrationUI() {
   $('#gcal-connect').hidden = gConnected() || !isServer() || !Cloud.integrations.google?.configured;
   $('#ev-gcal-wrap').hidden = !gConnected() || !!$('#ev-id').value;
   renderDashLinks();
-  if (document.querySelector('#view-settings.active')) renderIntegPanel();
+  if (document.querySelector('#view-me.active') && ui.meTab === 'settings') renderIntegPanel();
 }
 
 $('#toss-sync').addEventListener('click', () => syncToss());
@@ -334,7 +334,7 @@ function autoRefresh() {
   if (!isServer()) return;
   const active = document.querySelector('.view.active')?.id;
   if ((active === 'view-stocks' || active === 'view-dashboard') && tossReady() && !tossBusy && !tossError && stale(state.toss?.fetchedAt, 10)) syncToss({ silent: true });
-  if ((active === 'view-schedule' || active === 'view-dashboard') && gConnected() && !gBusy && stale(meta().gcalAt, 15)) syncGoogle({ silent: true });
+  if ((active === 'view-records' || active === 'view-dashboard') && gConnected() && !gBusy && stale(meta().gcalAt, 15)) syncGoogle({ silent: true });
 }
 
 const baseRender = render;

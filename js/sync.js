@@ -1,23 +1,34 @@
 'use strict';
 /* =========================================================
- * 클라우드 동기화
- *  - 통합 서버(server/server.mjs)에서 열면: 로그인 → 모든 기기 데이터 동기화
- *  - 파일로 열거나 정적 호스팅이면: 이 기기에만 저장 (기존 방식)
- * app.js 다음에 로드됩니다.
+ * 클라우드 동기화 (기록 단위)
+ *  - 통합 서버에서 열면: 로그인 → 바뀐 기록만 서버와 주고받음
+ *  - 파일로 열거나 정적 호스팅이면: 이 기기에만 저장
+ * 로드 순서: records.js → app.js → … → sync.js → integrations.js
  * ========================================================= */
-const REV_KEY = 'myPlanner.rev';
-const DIRTY_KEY = 'myPlanner.dirty';
+const CURSOR_KEY = 'myPlanner.cursor';   // 서버에서 어디까지 받았는지
+const FLAT_KEY = 'myPlanner.flatBase';   // 서버와 마지막으로 맞춘 상태 (레코드 단위)
+const LEGACY_KEYS = ['myPlanner.rev', 'myPlanner.dirty', 'myPlanner.base'];
+
 const Cloud = {
   mode: 'detecting', // detecting | local | server
   authed: false,
-  rev: Number(localStorage.getItem(REV_KEY)) || 0,
-  dirty: localStorage.getItem(DIRTY_KEY) === '1',
+  dirty: false,
   status: 'idle',    // idle | saving | offline | error
   lastSyncAt: null,
   integrations: {},
-  pushTimer: null,
-  pushing: false,
+  syncing: false,
+  again: false,
+  timer: null,
 };
+let syncCursor = Number(localStorage.getItem(CURSOR_KEY)) || 0;
+let syncBase = (() => { try { return JSON.parse(localStorage.getItem(FLAT_KEY)); } catch { return null; } })();
+
+function persistSync() {
+  try {
+    localStorage.setItem(CURSOR_KEY, String(syncCursor));
+    localStorage.setItem(FLAT_KEY, JSON.stringify(syncBase));
+  } catch { /* 저장 공간 부족 등: 다음 동기화 때 다시 맞춰짐 */ }
+}
 
 async function api(path, { method = 'GET', body } = {}) {
   let res;
@@ -42,166 +53,71 @@ async function api(path, { method = 'GET', body } = {}) {
 }
 
 const isServer = () => Cloud.mode === 'server' && Cloud.authed;
-const hasLocalContent = () => ['events', 'trades', 'habits', 'goals', 'strengths', 'watchlist'].some((k) => state[k]?.length) ||
-  Object.keys(state.logs || {}).length > 0 || !!state.profile?.name;
-
-function setRev(rev) { Cloud.rev = rev; try { localStorage.setItem(REV_KEY, String(rev)); } catch { /* 무시 */ } }
-function setDirty(v) { Cloud.dirty = v; try { v ? localStorage.setItem(DIRTY_KEY, '1') : localStorage.removeItem(DIRTY_KEY); } catch { /* 무시 */ } }
-
-/* ---------- 3-way 병합 ----------
- * base   = 마지막으로 서버와 맞췄던 데이터
- * local  = 이 기기의 현재 데이터
- * remote = 서버의 최신 데이터
- * 양쪽에서 바뀐 부분을 항목(id)·키 단위로 합칩니다. 같은 항목을 양쪽에서 바꿨으면 이 기기 쪽이 우선. */
-const BASE_KEY = 'myPlanner.base';
-let syncBase = (() => { try { return JSON.parse(localStorage.getItem(BASE_KEY)); } catch { return null; } })();
-// 반드시 깊은 복사로 보관: state 와 객체를 공유하면 편집이 base 까지 바꿔 병합이 변경을 놓침
-function setBase(obj) {
-  const json = JSON.stringify(obj ?? {});
-  syncBase = JSON.parse(json);
-  try { localStorage.setItem(BASE_KEY, json); } catch { /* 무시 */ }
-}
-
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
-const isIdArr = (v) => Array.isArray(v) && v.every((x) => isObj(x) && 'id' in x);
-function merge3(base, local, remote) {
-  if (same(local, base)) return remote;
-  if (same(remote, base) || same(local, remote)) return local;
-  if (isIdArr(local) && isIdArr(remote) && (base === undefined || base === null || isIdArr(base))) {
-    const B = new Map((base || []).map((x) => [x.id, x]));
-    const L = new Map(local.map((x) => [x.id, x]));
-    const R = new Set(remote.map((x) => x.id));
-    const out = [];
-    for (const r of remote) {
-      if (L.has(r.id)) out.push(merge3(B.get(r.id), L.get(r.id), r));
-      else if (!B.has(r.id) || !same(B.get(r.id), r)) out.push(r); // 서버에서 추가·수정 (이 기기에서 지운 건 수정 안 된 경우만 삭제)
-    }
-    for (const l of local) {
-      if (R.has(l.id)) continue;
-      if (!B.has(l.id) || !same(B.get(l.id), l)) out.push(l);      // 이 기기에서 추가 (또는 서버가 지웠지만 여기서 고친 것)
-    }
-    return out;
-  }
-  if (isObj(local) && isObj(remote)) {
-    const b = isObj(base) ? base : {};
-    const out = {};
-    for (const k of new Set([...Object.keys(remote), ...Object.keys(local), ...Object.keys(b)])) {
-      const v = merge3(b[k], local[k], remote[k]);
-      if (v !== undefined) out[k] = v;
-    }
-    return out;
-  }
-  return local;
-}
 
 /* ---------- 저장 → 서버 반영 ---------- */
-let editSeq = 0;
 const localSave = save;
 save = function () {
   localSave();
   if (!isServer()) return;
-  editSeq++;
-  setDirty(true);
-  clearTimeout(Cloud.pushTimer);
-  Cloud.pushTimer = setTimeout(push, 600);
+  Cloud.dirty = true;
+  scheduleSync(600);
   updateSyncBadge();
 };
-
-const snapshot = () => JSON.parse(JSON.stringify(state));
-
-function adopt(remote) {
-  state = mergeState(JSON.parse(JSON.stringify(remote.data || {})));
-  localSave();
-  setRev(remote.rev);
-  setBase(remote.data || {});
-  setDirty(false);
-  Cloud.lastSyncAt = new Date();
-  render();
+function scheduleSync(ms) {
+  clearTimeout(Cloud.timer);
+  Cloud.timer = setTimeout(syncNow, ms);
 }
 
-// 서버 최신본과 이 기기 변경을 합친 뒤, 아직 안 올린 변경이 있으면 다시 올림
-function mergeWith(remote) {
-  const merged = merge3(syncBase ?? {}, snapshot(), remote.data ?? {});
-  state = mergeState(JSON.parse(JSON.stringify(merged)));
-  localSave();
-  setRev(remote.rev);
-  setBase(remote.data ?? {});
-  const changed = !same(merged, remote.data ?? {});
-  setDirty(changed);
-  Cloud.lastSyncAt = new Date();
-  render();
-  return changed;
-}
-
-async function push() {
-  if (!isServer() || Cloud.pushing) return;
-  Cloud.pushing = true; Cloud.status = 'saving'; updateSyncBadge();
-  let again = false;
+async function syncNow() {
+  if (!isServer()) return;
+  if (Cloud.syncing) { Cloud.again = true; return; }
+  Cloud.syncing = true; Cloud.again = false;
+  if (Cloud.dirty) { Cloud.status = 'saving'; updateSyncBadge(); }
+  let ok = false;
   try {
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const seq = editSeq, snap = snapshot();
-      try {
-        const r = await api('/api/data', { method: 'PUT', body: { baseRev: Cloud.rev, data: snap } });
-        setRev(r.rev); setBase(snap);
-        setDirty(editSeq !== seq); // 올리는 동안 또 바뀌었으면 한 번 더
-        again = Cloud.dirty;
-        Cloud.status = 'idle'; Cloud.lastSyncAt = new Date();
-        break;
-      } catch (e) {
-        if (e.status !== 409 || !e.data) throw e;
-        if (!mergeWith(e.data)) { Cloud.status = 'idle'; break; } // 합쳐 보니 서버와 같음
-      }
+    if (!syncBase) {
+      // 이 기기의 첫 동기화: 서버 기록을 먼저 받아 기준으로 삼고, 이 기기에만 있는 기록은 이어서 올림
+      const first = await api('/api/sync', { method: 'POST', body: { cursor: 0, changes: [] } });
+      const hadLocal = Object.keys(Records.flatten(state)).length;
+      Records.apply(state, first.changes);
+      syncBase = {};
+      for (const c of first.changes) Records.applyToFlat(syncBase, c);
+      syncCursor = first.cursor;
+      localSave(); persistSync(); render();
+      if (!first.changes.length && hadLocal > 12) toast('이 기기의 데이터를 서버에 올립니다. 이제 모든 기기에서 볼 수 있어요.');
     }
+    const sent = Records.flatten(state);
+    const changes = Records.diff(syncBase, sent);
+    const r = await api('/api/sync', { method: 'POST', body: { cursor: syncCursor, changes } });
+    for (const c of changes) Records.applyToFlat(syncBase, c);
+    // 요청하는 동안 이 기기에서 또 고친 줄은 건드리지 않고(다음 동기화 때 올라감), 나머지만 반영
+    const now = Records.flatten(state);
+    const incoming = r.changes.filter((c) => Records.same(now[c.k], sent[c.k]));
+    for (const c of r.changes) Records.applyToFlat(syncBase, c);
+    if (incoming.length) { Records.apply(state, incoming); localSave(); }
+    syncCursor = r.cursor;
+    persistSync();
+    Cloud.dirty = Records.diff(syncBase, Records.flatten(state)).length > 0;
+    Cloud.status = 'idle'; Cloud.lastSyncAt = new Date();
+    ok = true;
+    if (incoming.length) render();
   } catch (e) {
     if (e.offline) {
       Cloud.status = 'offline';
-      setTimeout(() => Cloud.dirty && push(), 15000);
+      scheduleSync(15000);
     } else {
       Cloud.status = 'error';
       if (e.status !== 401) toast('동기화 실패: ' + e.message);
     }
   } finally {
-    Cloud.pushing = false;
+    Cloud.syncing = false;
     updateSyncBadge();
-    if (again) setTimeout(push, 0);
+    if (ok && (Cloud.dirty || Cloud.again)) scheduleSync(0);
   }
 }
+const pull = syncNow;
 
-async function pull() {
-  if (!isServer() || Cloud.pushing) return;
-  if (Cloud.dirty) return push();
-  try {
-    const r = await api('/api/data?rev=' + Cloud.rev);
-    Cloud.status = 'idle'; Cloud.lastSyncAt = new Date();
-    if (!r.unchanged && r.data) {
-      if (Cloud.dirty) { if (mergeWith(r)) push(); } // 받는 사이에 편집이 생겼으면 병합
-      else adopt(r);
-    }
-  } catch (e) {
-    Cloud.status = e.offline ? 'offline' : 'error';
-  }
-  updateSyncBadge();
-}
-
-// 로그인 직후 첫 동기화
-async function initialSync() {
-  const r = await api('/api/data');
-  if (!r.data) {
-    // 서버가 비어 있음 → 이 기기의 데이터를 올림 (처음 쓰는 경우)
-    setRev(r.rev); setBase({});
-    if (hasLocalContent()) { setDirty(true); await push(); toast('이 기기의 데이터를 서버에 올렸습니다. 이제 모든 기기에서 볼 수 있어요.'); }
-    return;
-  }
-  if (Cloud.dirty || (!syncBase && hasLocalContent())) {
-    // 오프라인 동안 바꾼 내용, 또는 로그인 전부터 이 기기에 있던 데이터 → 서버 데이터와 합침
-    if (mergeWith(r)) await push();
-    return;
-  }
-  adopt(r);
-}
-
-/* ---------- 로그인 화면 ---------- */
+/* ---------- 로그인 ---------- */
 function showLogin() {
   Cloud.authed = false;
   $('#login').hidden = false;
@@ -231,7 +147,7 @@ async function refreshSession() {
 
 async function afterLogin() {
   await refreshSession();
-  try { await initialSync(); } catch (e) { toast('동기화 실패: ' + e.message); }
+  await syncNow();
   updateSyncBadge();
   render();
   document.dispatchEvent(new CustomEvent('cloud:ready'));
@@ -239,9 +155,10 @@ async function afterLogin() {
 
 async function logout(all = false) {
   if (!confirm(all ? '모든 기기에서 로그아웃할까요?' : '로그아웃할까요? 이 기기에 저장된 사본은 지워집니다.')) return;
-  if (Cloud.dirty) await push();
+  if (Cloud.dirty) await syncNow();
+  if (Cloud.dirty && !confirm('아직 서버에 저장되지 않은 변경이 있습니다. 그래도 로그아웃할까요?')) return;
   await api(all ? '/api/logout-all' : '/api/logout', { method: 'POST' }).catch(() => {});
-  for (const k of [STORAGE_KEY, REV_KEY, DIRTY_KEY, BASE_KEY]) localStorage.removeItem(k);
+  for (const k of [STORAGE_KEY, CURSOR_KEY, FLAT_KEY, ...LEGACY_KEYS]) localStorage.removeItem(k);
   location.reload();
 }
 
@@ -249,50 +166,48 @@ async function logout(all = false) {
 function updateSyncBadge() {
   const el = $('#sync-badge');
   if (!el) return;
-  const map = {
-    detecting: ['…', '확인 중'],
-    local: ['📱', '이 기기에만 저장'],
-  };
-  let [icon, text] = map[Cloud.mode] || [];
+  let text = { detecting: '확인 중', local: '이 기기에만 저장' }[Cloud.mode];
+  let st = Cloud.mode;
   if (Cloud.mode === 'server') {
-    if (!Cloud.authed) [icon, text] = ['🔒', '로그인 필요'];
-    else if (Cloud.status === 'saving' || Cloud.dirty) [icon, text] = ['⏳', '저장 중'];
-    else if (Cloud.status === 'offline') [icon, text] = ['📴', '오프라인 — 연결되면 자동 저장'];
-    else if (Cloud.status === 'error') [icon, text] = ['⚠️', '동기화 오류'];
-    else [icon, text] = ['☁️', '동기화됨'];
+    st = Cloud.status;
+    if (!Cloud.authed) { text = '로그인 필요'; st = 'error'; }
+    else if (Cloud.status === 'offline') text = '오프라인 · 연결되면 자동 저장';
+    else if (Cloud.status === 'error') text = '동기화 오류';
+    else if (Cloud.status === 'saving' || Cloud.dirty) { text = '저장 중'; st = 'saving'; }
+    else text = '동기화됨';
   }
   el.innerHTML = `<i aria-hidden="true"></i><span>${text}</span>`;
-  el.title = `${icon} ${text}`;
-  el.dataset.state = Cloud.mode === 'server' ? Cloud.status : Cloud.mode;
+  el.title = text;
+  el.dataset.state = st;
 }
 
 /* ---------- 시작 ---------- */
 (async function boot() {
   updateSyncBadge();
-  if (location.protocol === 'file:') { Cloud.mode = 'local'; updateSyncBadge(); document.dispatchEvent(new CustomEvent('cloud:ready')); return; }
+  const local = () => { Cloud.mode = 'local'; updateSyncBadge(); document.dispatchEvent(new CustomEvent('cloud:ready')); };
+  if (location.protocol === 'file:') return local();
   try {
     const s = await (await fetch('/api/session', { credentials: 'same-origin' })).json();
     if (!s.server) throw new Error();
     Cloud.mode = 'server';
-  } catch {
-    Cloud.mode = 'local'; updateSyncBadge(); document.dispatchEvent(new CustomEvent('cloud:ready')); return;
-  }
+  } catch { return local(); }
+  for (const k of LEGACY_KEYS) localStorage.removeItem(k);
   await refreshSession().catch(() => {});
   if (!Cloud.authed) { showLogin(); return; }
   await afterLogin();
 })();
 
-// 화면으로 돌아오거나 1분마다: 데이터 + 연동 상태(다른 기기에서 연결/해제했을 수 있음) 갱신
+// 화면으로 돌아오거나 1분마다: 기록 + 연동 상태(다른 기기에서 연결/해제했을 수 있음) 갱신
 async function refreshAll() {
   if (!isServer()) return;
   const before = JSON.stringify(Cloud.integrations);
   await refreshSession().catch(() => {});
   if (JSON.stringify(Cloud.integrations) !== before) render();
-  await pull();
+  await syncNow();
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshAll(); });
-window.addEventListener('online', () => (Cloud.dirty ? push() : pull()));
-window.addEventListener('beforeunload', (e) => { if (isServer() && Cloud.dirty) { push(); e.preventDefault(); } });
+window.addEventListener('online', syncNow);
+window.addEventListener('pagehide', () => { if (isServer() && Cloud.dirty) syncNow(); });
 setInterval(() => { if (document.visibilityState === 'visible') refreshAll(); }, 60000);
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {

@@ -12,10 +12,12 @@ const defaultState = () => ({
   profile: defaultProfile(),
   strengths: [],     // {id, title, desc, kind: 'strength'|'grow'}
   sajuNote: '',
-  habits: [],        // {id, name, icon}
+  habits: [],        // {id, name, icon, target(주 n회)}
   habitChecks: {},   // 'YYYY-MM-DD' -> [habitId]
   logs: {},          // 'YYYY-MM-DD' -> {mood, energy, sleep, exercise, weight, grateful, note}
-  goals: [],         // {id, title, area, due, progress}
+  goals: [],         // {id, title, area, due, progress, linkHabit, linkTarget, since}
+  snapshots: {},     // 'YYYY-MM-DD' -> {v, c, cur}  날짜별 자산 스냅샷
+  reviews: {},       // 주의 월요일 'YYYY-MM-DD' -> {note}
   events: [],        // {id, title, date, start, end, cat, memo, done}
   trades: [],        // {id, symbol, type, qty, price, date, memo}
   prices: {},        // symbol -> 현재가
@@ -30,6 +32,8 @@ function mergeState(data) {
   const s = Object.assign(defaultState(), data);
   s.profile = Object.assign(defaultProfile(), data.profile);
   s.settings = Object.assign(defaultState().settings, data.settings);
+  for (const k of ['logs', 'habitChecks', 'prices', 'targets', 'snapshots', 'reviews', 'meta']) if (!s[k] || typeof s[k] !== 'object') s[k] = {};
+  for (const k of ['strengths', 'habits', 'goals', 'events', 'trades', 'watchlist']) if (!Array.isArray(s[k])) s[k] = [];
   return s;
 }
 function loadState() {
@@ -94,26 +98,30 @@ function toast(msg) {
  * ========================================================= */
 const PAGES = {
   dashboard: ['홈', () => fmtDate(todayStr())],
-  me: ['나', () => '나를 소개하고, 나를 이해하기'],
-  care: ['자기관리', () => '습관 · 컨디션 · 목표'],
-  schedule: ['일정', () => '달력과 할 일'],
-  stocks: ['주식', () => '포트폴리오와 매매 기록'],
-  settings: ['설정', () => '연동 · 백업'],
+  records: ['기록', () => '달력 · 하루 기록 · 검색'],
+  insights: ['분석', () => '추세와 발견, 주간 리뷰'],
+  stocks: ['자산', () => '포트폴리오와 매매 기록'],
+  me: ['나', () => '프로필 · 목표 · 연동'],
 };
+const VIEW_ALIAS = { schedule: 'records', care: 'insights', settings: 'me' }; // 이전 주소 호환
 function showView(name) {
-  const [title, sub] = PAGES[name] || PAGES.dashboard;
+  name = VIEW_ALIAS[name] || name;
+  if (!PAGES[name]) name = 'dashboard';
+  const [title, sub] = PAGES[name];
   $('#page-title').textContent = title;
   $('#page-sub').textContent = sub();
   window.scrollTo(0, 0);
   document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + name));
-  location.hash = name;
+  if (location.hash.slice(1) !== name) history.replaceState(null, '', '#' + name);
   render();
 }
 document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
 document.addEventListener('click', (ev) => {
   const g = ev.target.closest('[data-goto]');
-  if (g) showView(g.dataset.goto);
+  if (!g) return;
+  if (g.dataset.pane) ui.meTab = g.dataset.pane;
+  showView(g.dataset.goto);
 });
 
 /* =========================================================
@@ -138,13 +146,14 @@ function renderCalendar() {
     if (i === 35 && d.getMonth() !== m) break; // 6번째 주가 필요 없으면 생략
     const ds = ymd(d);
     const evs = eventsOn(ds);
+    const mood = state.logs[ds]?.mood;
     const cell = document.createElement('button');
     cell.type = 'button';
     cell.className = 'cal-cell' + (d.getMonth() !== m ? ' other' : '') + (ds === today ? ' today' : '') + (ds === selectedDate ? ' selected' : '');
-    cell.innerHTML = `<span class="num">${d.getDate()}</span>` +
+    cell.innerHTML = `<span class="cal-top"><span class="num">${d.getDate()}</span>${mood ? `<span class="cal-mood" title="기분 ${mood}">${MOOD_EMOJI[mood]}</span>` : (state.logs[ds] || state.habitChecks[ds] ? '<span class="cal-has"></span>' : '')}</span>` +
       evs.slice(0, 3).map((e) => `<span class="chip" style="background:${CAT_COLOR[e.cat] || CAT_COLOR.etc}">${esc(e.title)}</span>`).join('') +
       (evs.length > 3 ? `<span class="more">+${evs.length - 3}</span>` : '');
-    cell.addEventListener('click', () => { selectedDate = ds; resetEventForm(); renderSchedule(); });
+    cell.addEventListener('click', () => { selectedDate = ds; resetEventForm(); renderRecords(); });
     grid.appendChild(cell);
   }
 }
@@ -158,25 +167,17 @@ function eventItem(e, { showDate = false, editable = true } = {}) {
       <div class="sub">${showDate ? fmtDate(e.date) + ' · ' : ''}${timeRange(e)} · ${CAT_LABEL[e.cat] || '기타'}${e.memo ? ' · ' + esc(e.memo) : ''}</div>
     </div>
     ${!editable ? '' : e.source === 'google'
-      ? (e.link ? `<a class="icon-btn" href="${esc(e.link)}" target="_blank" rel="noopener" title="구글 캘린더에서 열기">↗</a>` : '')
-      : '<button class="icon-btn ev-edit" title="수정">✏️</button><button class="icon-btn ev-del" title="삭제">🗑️</button>'}
+      ? (e.link ? `<a class="icon-btn" href="${esc(e.link)}" target="_blank" rel="noopener" title="구글 캘린더에서 열기">${ico('ext')}</a>` : '')
+      : `<button class="icon-btn ev-edit" title="수정">${ico('edit')}</button><button class="icon-btn ev-del" title="삭제">${ico('trash')}</button>`}
   </li>`;
 }
-
-function renderDayPanel() {
-  $('#day-title').textContent = fmtDate(selectedDate);
-  const evs = eventsOn(selectedDate);
-  $('#day-events').innerHTML = evs.length ? evs.map((e) => eventItem(e)).join('') : '<li class="empty">일정이 없습니다</li>';
-  if (!$('#ev-id').value) $('#ev-date').value = selectedDate;
-}
-
-function renderSchedule() { renderCalendar(); renderDayPanel(); }
 
 function resetEventForm() {
   $('#event-form').reset();
   $('#ev-id').value = '';
   $('#ev-date').value = selectedDate;
   $('#event-form-title').textContent = '일정 추가';
+  $('#event-details').open = false;
 }
 
 $('#event-form').addEventListener('submit', (ev) => {
@@ -230,6 +231,7 @@ document.addEventListener('click', (ev) => {
     $('#ev-memo').value = e.memo || '';
     $('#ev-done').checked = !!e.done;
     $('#event-form-title').textContent = '일정 수정';
+    $('#event-details').open = true;
     $('#ev-title').focus();
   }
 });
@@ -237,7 +239,7 @@ document.addEventListener('click', (ev) => {
 $('#cal-prev').addEventListener('click', () => { calCursor.setMonth(calCursor.getMonth() - 1); renderCalendar(); });
 $('#cal-next').addEventListener('click', () => { calCursor.setMonth(calCursor.getMonth() + 1); renderCalendar(); });
 $('#cal-today').addEventListener('click', () => {
-  calCursor = new Date(); calCursor.setDate(1); selectedDate = todayStr(); resetEventForm(); renderSchedule();
+  calCursor = new Date(); calCursor.setDate(1); selectedDate = todayStr(); resetEventForm(); renderRecords();
 });
 
 /* =========================================================
@@ -335,7 +337,7 @@ function renderStocks() {
       <td class="${t.type === 'buy' ? 'up' : 'down'}">${t.type === 'buy' ? '매수' : '매도'}</td>
       <td>${t.qty.toLocaleString()}</td><td>${money(t.price)}</td><td>${money(t.qty * t.price)}</td>
       <td>${esc(t.memo || '')}</td>
-      <td><button class="icon-btn trade-del" title="삭제">🗑️</button></td>
+      <td><button class="icon-btn trade-del" title="삭제">${ico('trash')}</button></td>
     </tr>`).join('') : '<tr><td colspan="8" class="empty">매매 기록이 없습니다</td></tr>';
 
   const symbols = new Set([...state.trades.map((t) => t.symbol), ...state.watchlist.map((w) => w.symbol)]);
@@ -349,8 +351,8 @@ function renderStocks() {
         ${price != null && target && price >= target ? '<span class="badge hit">목표 도달</span>' : ''}</div>
         <div class="sub">현재가 ${price != null ? money(price) : '-'} · 목표가 ${target ? money(target) : '-'}${isFinite(gap) ? ` (목표까지 ${pct(gap)})` : ''}</div>
       </div>
-      <button class="icon-btn w-edit" title="가격 수정">✏️</button>
-      <button class="icon-btn w-del" title="삭제">🗑️</button>
+      <button class="icon-btn w-edit" title="가격 수정">${ico('edit')}</button>
+      <button class="icon-btn w-del" title="삭제">${ico('trash')}</button>
     </li>`;
   }).join('') : '<li class="empty">관심 종목이 없습니다</li>';
 }
@@ -514,7 +516,7 @@ function heroHtml({ compact = false } = {}) {
       <div class="tags">${tags}</div>
       ${p.motto ? `<div class="quote">“${esc(p.motto)}”</div>` : ''}
     </div>
-    ${compact ? '<button class="btn ghost small" data-goto="me">프로필 보기</button>' : '<button class="btn ghost small" id="pf-edit-btn">✏️ 편집</button>'}`;
+    ${compact ? '' : '<button class="btn ghost small" id="pf-edit-btn">편집</button>'}`;
 }
 
 function renderProfileView() {
@@ -562,7 +564,7 @@ $('#pf-cancel').addEventListener('click', closeProfileEdit);
 function strengthItem(s) {
   return `<li data-sid="${s.id}"><span>${s.kind === 'grow' ? '🌱' : '⭐'}</span>
     <div class="grow"><div><strong>${esc(s.title)}</strong></div>${s.desc ? `<div class="sub">${esc(s.desc)}</div>` : ''}</div>
-    <button class="icon-btn st-del" title="삭제">🗑️</button></li>`;
+    <button class="icon-btn st-del" title="삭제">${ico('trash')}</button></li>`;
 }
 function renderStrengths() {
   const st = state.strengths.filter((s) => s.kind !== 'grow');
@@ -621,250 +623,20 @@ function renderSaju() {
 $('#saju-note').addEventListener('input', (ev) => { state.sajuNote = ev.target.value; save(); });
 
 function renderMe() {
-  renderProfileView();
-  renderStrengths();
-  renderSaju();
-  $('#saju-note').value = state.sajuNote || '';
-}
-
-/* =========================================================
- * 자기관리 (습관 · 기록 · 목표)
- * ========================================================= */
-const lastDays = (n) => Array.from({ length: n }, (_, i) => { const d = new Date(); d.setDate(d.getDate() - (n - 1 - i)); return ymd(d); });
-const isChecked = (date, hid) => (state.habitChecks[date] || []).includes(hid);
-function toggleHabit(date, hid) {
-  const arr = state.habitChecks[date] || [];
-  state.habitChecks[date] = arr.includes(hid) ? arr.filter((x) => x !== hid) : [...arr, hid];
-  if (!state.habitChecks[date].length) delete state.habitChecks[date];
-  save();
-}
-function streakOf(hid) {
-  const d = new Date();
-  if (!isChecked(ymd(d), hid)) d.setDate(d.getDate() - 1); // 오늘 아직 안 했으면 어제부터
-  let n = 0;
-  while (isChecked(ymd(d), hid)) { n++; d.setDate(d.getDate() - 1); }
-  return n;
-}
-
-function renderHabits() {
-  const days = lastDays(7), today = todayStr();
-  const t = $('#habit-table');
-  if (!state.habits.length) {
-    t.innerHTML = '<tbody><tr><td class="empty">습관을 추가해 보세요 (예: 🏃 아침 러닝, 📖 독서 20분)</td></tr></tbody>';
-    return;
+  document.querySelectorAll('#me-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.pane === ui.meTab));
+  document.querySelectorAll('.me-pane').forEach((p) => (p.hidden = p.dataset.pane !== ui.meTab));
+  if (ui.meTab === 'profile') {
+    renderProfileView();
+    renderMeData();
+    renderStrengths();
+    renderSaju();
+    if (document.activeElement !== $('#saju-note')) $('#saju-note').value = state.sajuNote || '';
+  } else if (ui.meTab === 'plan') {
+    renderGoals();
+    renderHabitDefs();
+  } else {
+    $('#set-currency').value = state.settings.currency;
   }
-  t.innerHTML = `<thead><tr><th>습관</th>${days.map((d) => {
-    const dt = parseYmd(d);
-    return `<th class="${d === today ? 'today-col' : ''}">${WEEK[dt.getDay()]}<br>${dt.getDate()}</th>`;
-  }).join('')}<th>연속</th><th></th></tr></thead>
-  <tbody>${state.habits.map((h) => `<tr data-hid="${h.id}">
-    <td>${esc(h.icon || '•')} ${esc(h.name)}</td>
-    ${days.map((d) => `<td><button class="hcheck ${isChecked(d, h.id) ? 'on' : ''}" data-hid="${h.id}" data-date="${d}">${isChecked(d, h.id) ? '✓' : ''}</button></td>`).join('')}
-    <td><span class="streak">${streakOf(h.id) ? '🔥' + streakOf(h.id) : '-'}</span></td>
-    <td><button class="icon-btn hb-del" title="삭제">🗑️</button></td>
-  </tr>`).join('')}</tbody>`;
-}
-$('#habit-form').addEventListener('submit', (ev) => {
-  ev.preventDefault();
-  const name = $('#hb-name').value.trim();
-  if (!name) return;
-  state.habits.push({ id: uid(), name, icon: $('#hb-icon').value.trim() });
-  save(); ev.target.reset(); render();
-});
-document.addEventListener('click', (ev) => {
-  const btn = ev.target.closest('.hcheck');
-  if (btn) { toggleHabit(btn.dataset.date, btn.dataset.hid); render(); return; }
-  if (ev.target.classList.contains('hb-del')) {
-    const id = ev.target.closest('tr').dataset.hid;
-    const h = state.habits.find((x) => x.id === id);
-    if (h && confirm(`'${h.name}' 습관을 삭제할까요? (체크 기록도 함께 삭제)`)) {
-      state.habits = state.habits.filter((x) => x.id !== id);
-      for (const d of Object.keys(state.habitChecks)) {
-        state.habitChecks[d] = state.habitChecks[d].filter((x) => x !== id);
-        if (!state.habitChecks[d].length) delete state.habitChecks[d];
-      }
-      save(); render();
-    }
-  }
-});
-
-// 일일 기록
-function loadLogForm() {
-  const l = state.logs[$('#lg-date').value] || {};
-  $('#lg-mood').value = l.mood || 3;
-  $('#lg-energy').value = l.energy || 3;
-  $('#lg-sleep').value = l.sleep ?? '';
-  $('#lg-exercise').value = l.exercise ?? '';
-  $('#lg-weight').value = l.weight ?? '';
-  $('#lg-steps').value = l.steps ?? '';
-  $('#lg-grateful').value = l.grateful || '';
-  $('#lg-note').value = l.note || '';
-}
-$('#lg-date').addEventListener('change', loadLogForm);
-const numOrNull = (v) => (v === '' ? null : parseFloat(v));
-$('#log-form').addEventListener('submit', (ev) => {
-  ev.preventDefault();
-  const date = $('#lg-date').value;
-  if (!date) return;
-  state.logs[date] = {
-    ...state.logs[date], // 삼성헬스 등에서 가져온 다른 필드 보존
-    steps: numOrNull($('#lg-steps').value),
-    mood: +$('#lg-mood').value, energy: +$('#lg-energy').value,
-    sleep: numOrNull($('#lg-sleep').value), exercise: numOrNull($('#lg-exercise').value), weight: numOrNull($('#lg-weight').value),
-    grateful: $('#lg-grateful').value.trim(), note: $('#lg-note').value.trim(),
-  };
-  save(); toast(`${fmtDate(date)} 기록을 저장했습니다`); render();
-});
-
-function renderLogList() {
-  const dates = Object.keys(state.logs).sort().reverse();
-  $('#log-list').innerHTML = dates.length ? dates.map((d) => {
-    const l = state.logs[d];
-    const meta = [l.sleep != null && `수면 ${l.sleep}h`, l.exercise != null && `운동 ${l.exercise}분`, l.weight != null && `${l.weight}kg`, l.steps != null && `${Number(l.steps).toLocaleString()}보`, l.energy != null && `에너지 ${l.energy}`].filter(Boolean).join(' · ');
-    return `<li class="col" data-ldate="${d}">
-      <div class="row" style="align-items:center"><strong class="grow">${MOOD_EMOJI[l.mood] || ''} ${fmtDate(d)}</strong>
-        <button class="icon-btn lg-edit" title="불러오기">✏️</button><button class="icon-btn lg-del" title="삭제">🗑️</button></div>
-      <div class="sub">${meta}</div>
-      ${l.grateful ? `<div>🙏 ${esc(l.grateful)}</div>` : ''}
-      ${l.note ? `<div class="about sub">${esc(l.note)}</div>` : ''}
-    </li>`;
-  }).join('') : '<li class="empty">아직 기록이 없습니다</li>';
-}
-$('#log-list').addEventListener('click', (ev) => {
-  const li = ev.target.closest('li[data-ldate]');
-  if (!li) return;
-  const d = li.dataset.ldate;
-  if (ev.target.classList.contains('lg-edit')) { $('#lg-date').value = d; loadLogForm(); $('#log-form').scrollIntoView({ behavior: 'smooth' }); }
-  if (ev.target.classList.contains('lg-del') && confirm(`${fmtDate(d)} 기록을 삭제할까요?`)) { delete state.logs[d]; save(); render(); }
-});
-
-function renderTrend() {
-  const days = lastDays(14);
-  const W = 700, H = 200, L = 24, R = 10, T = 10, B = 24;
-  const x = (i) => L + (i * (W - L - R)) / (days.length - 1);
-  const y = (v) => T + (H - T - B) * (1 - (v - 0) / 6);
-  const series = [
-    { key: 'mood', color: 'var(--c-work)', f: (l) => l.mood },
-    { key: 'energy', color: 'var(--c-personal)', f: (l) => l.energy },
-    { key: 'sleep', color: 'var(--c-etc)', f: (l) => (l.sleep != null ? Math.min(l.sleep / 2, 6) : null) },
-  ];
-  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="최근 14일 컨디션 추이">`;
-  for (let v = 1; v <= 5; v++) svg += `<line class="axis" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" /><text x="4" y="${y(v) + 3}">${v}</text>`;
-  days.forEach((d, i) => { if (i % 2 === 0 || i === days.length - 1) svg += `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${parseYmd(d).getDate()}</text>`; });
-  let any = false;
-  for (const s of series) {
-    const pts = days.map((d, i) => { const l = state.logs[d]; const v = l ? s.f(l) : null; return v != null ? [x(i), y(v)] : null; });
-    // 연속 구간끼리 선으로 연결
-    let path = '', pen = false;
-    pts.forEach((p) => { if (p) { path += (pen ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); pen = true; any = true; } else pen = false; });
-    if (path) svg += `<path d="${path}" fill="none" stroke="${s.color}" stroke-width="2.5" vector-effect="non-scaling-stroke" />`;
-    pts.forEach((p) => { if (p) svg += `<circle cx="${p[0]}" cy="${p[1]}" r="3.5" fill="${s.color}" />`; });
-  }
-  if (!any) svg += `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" style="font-size:13px">기록을 남기면 추이가 표시됩니다</text>`;
-  $('#trend-chart').innerHTML = svg + '</svg>';
-}
-
-// 목표
-function goalItem(g, { editable = true } = {}) {
-  const dday = g.due ? Math.round((parseYmd(g.due) - parseYmd(todayStr())) / 86400000) : null;
-  const ddayTxt = dday == null ? '' : dday > 0 ? `D-${dday}` : dday === 0 ? 'D-day' : `D+${-dday}`;
-  return `<li class="col" data-gid="${g.id}">
-    <div class="row" style="align-items:center">
-      <span class="tag">${AREA_LABEL[g.area] || '기타'}</span>
-      <strong class="grow">${g.progress >= 100 ? '🏆 ' : ''}${esc(g.title)}</strong>
-      <span class="sub">${ddayTxt ? ddayTxt + ' · ' : ''}${g.progress}%</span>
-      ${editable ? '<button class="icon-btn gl-del" title="삭제">🗑️</button>' : ''}
-    </div>
-    ${editable ? `<input type="range" class="goal-range" min="0" max="100" step="5" value="${g.progress}" aria-label="진행률" />`
-               : `<div class="progress"><div style="width:${g.progress}%"></div></div>`}
-  </li>`;
-}
-function renderGoals() {
-  $('#goal-list').innerHTML = state.goals.length ? state.goals.map((g) => goalItem(g)).join('') : '<li class="empty">목표를 세워보세요</li>';
-}
-$('#goal-form').addEventListener('submit', (ev) => {
-  ev.preventDefault();
-  const title = $('#gl-title').value.trim();
-  if (!title) return;
-  state.goals.push({ id: uid(), title, area: $('#gl-area').value, due: $('#gl-due').value, progress: 0 });
-  save(); ev.target.reset(); renderGoals();
-});
-$('#goal-list').addEventListener('input', (ev) => {
-  if (!ev.target.classList.contains('goal-range')) return;
-  const g = state.goals.find((x) => x.id === ev.target.closest('li').dataset.gid);
-  g.progress = +ev.target.value;
-  ev.target.closest('li').querySelector('.sub').textContent = ev.target.closest('li').querySelector('.sub').textContent.replace(/\d+%$/, g.progress + '%');
-  save();
-});
-$('#goal-list').addEventListener('change', (ev) => { if (ev.target.classList.contains('goal-range')) renderGoals(); });
-$('#goal-list').addEventListener('click', (ev) => {
-  if (!ev.target.classList.contains('gl-del')) return;
-  const id = ev.target.closest('li').dataset.gid;
-  if (confirm('이 목표를 삭제할까요?')) { state.goals = state.goals.filter((g) => g.id !== id); save(); renderGoals(); }
-});
-
-function renderCare() {
-  renderHabits();
-  renderTrend();
-  renderGoals();
-  renderLogList();
-}
-
-/* =========================================================
- * 홈 대시보드
- * ========================================================= */
-function renderDashboard() {
-  const today = todayStr();
-  $('#dash-hero').innerHTML = heroHtml({ compact: true });
-  $('#logo-emoji').textContent = state.profile.emoji || '🌱';
-
-  // 습관
-  const doneCount = state.habits.filter((h) => isChecked(today, h.id)).length;
-  $('#dash-habit-rate').textContent = state.habits.length ? `${doneCount}/${state.habits.length}` : '';
-  $('#dash-habits').innerHTML = state.habits.length ? state.habits.map((h) => `<li>
-      <button class="hcheck ${isChecked(today, h.id) ? 'on' : ''}" data-hid="${h.id}" data-date="${today}">${isChecked(today, h.id) ? '✓' : ''}</button>
-      <span class="grow">${esc(h.icon || '')} ${esc(h.name)}</span><span class="streak">${streakOf(h.id) ? '🔥' + streakOf(h.id) : ''}</span></li>`).join('')
-    : '<li class="empty"><button class="btn ghost small" data-goto="care">습관 추가하기</button></li>';
-
-  // 일정
-  $('#dash-today').textContent = fmtDate(today);
-  const todays = eventsOn(today);
-  $('#dash-events').innerHTML = todays.length ? todays.map((e) => eventItem(e, { editable: false })).join('') : '<li class="empty">오늘 일정이 없습니다</li>';
-  const end = new Date(); end.setDate(end.getDate() + 7);
-  const endStr = ymd(end);
-  const upcoming = state.events.filter((e) => e.date > today && e.date <= endStr).sort(sortEvents);
-  $('#dash-upcoming').innerHTML = upcoming.length ? upcoming.map((e) => eventItem(e, { showDate: true, editable: false })).join('') : '<li class="empty">예정된 일정이 없습니다</li>';
-
-  // 컨디션
-  const week = lastDays(7).map((d) => state.logs[d]).filter(Boolean);
-  const avg = (f) => { const v = week.map(f).filter((x) => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
-  const mood = avg((l) => l.mood), sleep = avg((l) => l.sleep), steps = avg((l) => l.steps), ex = week.reduce((a, l) => a + (l.exercise || 0), 0);
-  const habitRate = state.habits.length
-    ? (lastDays(7).reduce((a, d) => a + state.habits.filter((h) => isChecked(d, h.id)).length, 0) / (state.habits.length * 7)) * 100 : null;
-  $('#dash-condition').innerHTML = `
-    <div class="stat"><div class="label">평균 기분</div><div class="value">${mood != null ? MOOD_EMOJI[Math.round(mood)] + ' ' + mood.toFixed(1) : '-'}</div></div>
-    <div class="stat"><div class="label">평균 수면</div><div class="value">${sleep != null ? sleep.toFixed(1) + 'h' : '-'}</div></div>
-    <div class="stat"><div class="label">총 운동</div><div class="value">${ex ? ex + '분' : '-'}</div></div>
-    <div class="stat"><div class="label">습관 달성률</div><div class="value">${habitRate != null ? Math.round(habitRate) + '%' : '-'}</div></div>
-    <div class="stat"><div class="label">평균 걸음</div><div class="value">${steps != null ? Math.round(steps).toLocaleString() : '-'}</div></div>
-    <div class="stat"><div class="label">기록한 날</div><div class="value">${week.length}/7</div></div>`;
-
-  // 목표
-  const goals = [...state.goals].sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999')).slice(0, 5);
-  $('#dash-goals').innerHTML = goals.length ? goals.map((g) => goalItem(g, { editable: false })).join('') : '<li class="empty"><button class="btn ghost small" data-goto="care">목표 세우기</button></li>';
-
-  // 포트폴리오
-  const p = computeHoldings();
-  $('#dash-stats').innerHTML = statsHtml(p);
-  let items = p.holdings.map((h) => ({ label: h.symbol, value: h.value }));
-  if (items.length > 8) {
-    const rest = items.slice(7).reduce((s, i) => s + i.value, 0);
-    items = [...items.slice(0, 7), { label: '기타', value: rest }];
-  }
-  drawPie($('#dash-pie'), items);
-  const total = items.reduce((s, i) => s + i.value, 0);
-  $('#dash-legend').innerHTML = items.map((it, i) =>
-    `<span><span class="dot" style="background:${PIE_COLORS[i % PIE_COLORS.length]}"></span>${esc(it.label)} ${((it.value / total) * 100).toFixed(1)}%</span>`).join('');
 }
 
 /* =========================================================
@@ -899,7 +671,7 @@ $('#import-file').addEventListener('change', async (ev) => {
   }
 });
 $('#reset-btn').addEventListener('click', () => {
-  if (confirm('모든 일정과 주식 데이터를 삭제합니다. 계속할까요?')) {
+  if (confirm('프로필, 기록, 일정, 자산 등 모든 데이터를 삭제합니다. 되돌릴 수 없습니다. 계속할까요?')) {
     state = defaultState(); save(); toast('초기화했습니다'); render();
   }
 });
@@ -909,17 +681,13 @@ $('#reset-btn').addEventListener('click', () => {
  * ========================================================= */
 function render() {
   const active = document.querySelector('.view.active')?.id;
-  if (active === 'view-dashboard') renderDashboard();
+  $('#logo-emoji').textContent = state.profile.emoji || '🌱';
+  if (active === 'view-dashboard') renderHome();
+  if (active === 'view-records') renderRecords();
+  if (active === 'view-insights') renderInsights();
+  if (active === 'view-stocks') { renderStocks(); renderAssets(); }
   if (active === 'view-me') renderMe();
-  if (active === 'view-care') renderCare();
-  if (active === 'view-schedule') renderSchedule();
-  if (active === 'view-stocks') renderStocks();
-  if (active === 'view-settings') $('#set-currency').value = state.settings.currency;
+  if (!$('#sheet').hidden) renderSheet();
 }
 
 $('#tr-date').value = todayStr();
-$('#lg-date').value = todayStr();
-loadLogForm();
-const initial = location.hash.slice(1);
-if (['dashboard', 'me', 'care', 'schedule', 'stocks', 'settings'].includes(initial)) showView(initial);
-else showView('dashboard');

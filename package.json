@@ -1,0 +1,9 @@
+{
+  "name": "my-life",
+  "private": true,
+  "description": "나를 관리하는 플랫폼",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning --env-file=server/.env server/server.mjs"
+  },
+  "engines": { "node": ">=22.13" }
+}
