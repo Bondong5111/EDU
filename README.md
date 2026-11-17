@@ -30,8 +30,9 @@
 `server/server.mjs` 하나를 실행하면 웹사이트·로그인·데이터 동기화·토스증권·구글 캘린더·팻시크릿이 모두 연결됩니다. Node.js 22.13 이상이 필요합니다(내장 SQLite 사용, 따로 설치할 것 없음).
 
 ```bash
-cp server/.env.example server/.env    # 비밀번호 등 입력
-npm start
+npm run setup    # 비밀번호와 (선택) 토스증권 키를 물어보고 설정 파일을 만들어 줌
+npm run check    # 토스증권 연결 확인 (키를 넣었을 때)
+npm start        # http://localhost:8787
 ```
 
 | 기능 | 설명 |
