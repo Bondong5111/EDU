@@ -1,6 +1,6 @@
 'use strict';
 /* =========================================================
- * 외부 연동: 토스증권 · 구글 캘린더 · 팻시크릿 (통합 서버 경유) · 삼성헬스 (CSV)
+ * 외부 연동: 토스증권 · 구글 캘린더 · 팻시크릿 · 노션 (통합 서버 경유) · 삼성헬스 (CSV)
  * 로드 순서: app.js → sync.js → integrations.js
  * ========================================================= */
 const timeAgo = (iso) => {
@@ -184,6 +184,27 @@ async function disconnectFatsecret() {
 }
 
 /* =========================================================
+ * 노션: 서버가 기록을 노션 표로 보냄 (사이트 → 노션). 여기서는 상태 표시와 "지금 보내기"만
+ * ========================================================= */
+const notionInfo = () => (isServer() && Cloud.integrations.notion) || null;
+let notionPoll = null;
+async function refreshNotion() {
+  try {
+    Cloud.integrations.notion = await api('/api/notion/status');
+  } catch { /* 다음에 다시 */ }
+  updateIntegrationUI();
+  clearTimeout(notionPoll);
+  if (Cloud.integrations.notion?.running) notionPoll = setTimeout(refreshNotion, 2000);
+}
+async function syncNotion() {
+  try {
+    Cloud.integrations.notion = await api('/api/notion/sync', { method: 'POST' });
+    toast('노션으로 보내는 중입니다. 처음에는 기록 양에 따라 몇 분 걸릴 수 있어요');
+    refreshNotion();
+  } catch (e) { toast(e.message); }
+}
+
+/* =========================================================
  * 삼성헬스 CSV 가져오기
  * 파일 예: com.samsung.shealth.sleep.<시각>.csv
  *  1행 메타데이터, 2행 헤더(접두사 포함), 3행~ 데이터. 시각은 UTC + time_offset(예: UTC+0900)
@@ -309,6 +330,12 @@ function connections() {
         : fsBusy ? '가져오는 중…' : fsError ? '⚠️ ' + fsError : `연결됨${meta().fatsecretAt ? ' · ' + timeAgo(meta().fatsecretAt) : ''}`,
     },
     {
+      id: 'notion', icon: 'book', name: '노션',
+      ok: !!notionInfo()?.configured && !notionInfo().error && !!notionInfo().lastSyncAt,
+      text: !server ? '서버 필요' : !notionInfo()?.configured ? '서버에 키 미설정' : notionInfo().running ? `보내는 중…${notionInfo().sent ? ` (${notionInfo().sent}건)` : ''}`
+        : notionInfo().error ? '⚠️ ' + notionInfo().error : notionInfo().lastSyncAt ? `자동으로 보냄 · ${timeAgo(notionInfo().lastSyncAt)}` : '아직 보내지 않음',
+    },
+    {
       id: 'samsung', icon: 'heart', name: '삼성헬스',
       ok: !!meta().samsungAt,
       text: meta().samsungAt ? `CSV 가져옴 · ${timeAgo(meta().samsungAt)}` : 'CSV로 가져오기',
@@ -338,6 +365,7 @@ function renderIntegPanel() {
     fatsecret: !server || !ig.fatsecret?.configured ? ''
       : ig.fatsecret.connected ? '<button class="btn small" data-act="fsync">지금 가져오기</button><button class="btn ghost small" data-act="fdisconnect">연결 해제</button>'
       : '<button class="btn small" data-act="fconnect">팻시크릿 계정 연결</button>',
+    notion: notionInfo()?.configured ? `<button class="btn small" data-act="nsync" ${notionInfo().running ? 'disabled' : ''}>지금 보내기</button>${notionInfo().url ? `<a class="btn ghost small" href="${esc(notionInfo().url)}" target="_blank" rel="noopener">노션에서 열기</a>` : ''}` : '',
     samsung: '<label class="btn ghost small" for="sh-files">CSV 가져오기</label>',
   };
   el.innerHTML = connections().map((c) => `
@@ -346,7 +374,7 @@ function renderIntegPanel() {
       <div class="grow"><strong>${esc(c.name)}</strong> <span class="dot-status ${c.ok ? 'ok' : ''}"></span><div class="sub">${esc(c.text)}</div></div>
       <div class="integ-actions">${actions[c.id]}</div>
     </div>`).join('') +
-    (Cloud.mode === 'local' ? `<div class="notice">지금은 <strong>이 기기에만</strong> 저장됩니다. 통합 서버(<code>server/server.mjs</code>)로 실행하면 휴대폰·PC 데이터가 하나로 동기화되고 토스증권·구글 캘린더·팻시크릿이 자동으로 연결됩니다.</div>` : '');
+    (Cloud.mode === 'local' ? `<div class="notice">지금은 <strong>이 기기에만</strong> 저장됩니다. 통합 서버(<code>server/server.mjs</code>)로 실행하면 휴대폰·PC 데이터가 하나로 동기화되고 토스증권·구글 캘린더·팻시크릿·노션이 자동으로 연결됩니다.</div>` : '');
   $('#gcal-id-row').hidden = !gConnected();
   $('#set-gcal-id').value = state.settings.googleCalendarId || 'primary';
   $('#set-usdkrw').value = state.settings.usdKrw ?? '';
@@ -360,6 +388,7 @@ $('#integ-panel').addEventListener('click', (ev) => {
   if (act === 'gsync') syncGoogle();
   if (act === 'gdisconnect') disconnectGoogle().catch((e) => toast(e.message));
   if (act === 'gconnect') location.href = '/api/google/connect';
+  if (act === 'nsync') syncNotion();
   if (act === 'fconnect') connectFatsecret();
   if (act === 'fsync') syncFatsecret();
   if (act === 'fdisconnect') disconnectFatsecret().catch((e) => toast(e.message));

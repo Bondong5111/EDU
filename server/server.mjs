@@ -3,7 +3,7 @@
  * MY LIFE 통합 서버 (의존성 없음, Node 22.13+)
  *  - 웹사이트 제공 + 비밀번호 로그인
  *  - 모든 기기 데이터 동기화 (SQLite 에 기록 단위로 저장 + 시간별 백업)
- *  - 토스증권 조회 / 구글 캘린더 / 팻시크릿(식단·체중) 연동
+ *  - 토스증권 조회 / 구글 캘린더 / 팻시크릿(식단·체중) 연동 / 노션으로 기록 보내기
  *
  * 실행:  npm start
  * 설정값은 server/.env.example 참고
@@ -19,6 +19,7 @@ import Records from '../js/records.js';
 import { createToss, HttpError } from './lib/toss.mjs';
 import { createGoogle } from './lib/google.mjs';
 import { createFatsecret } from './lib/fatsecret.mjs';
+import { createNotion } from './lib/notion.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const env = process.env;
@@ -70,6 +71,16 @@ const fatsecret = createFatsecret({
   callbackUrl: `${BASE_URL}/api/fatsecret/callback`, secrets,
   ...(env.FATSECRET_TEST_BASE ? { authBase: env.FATSECRET_TEST_BASE, apiBase: env.FATSECRET_TEST_BASE } : {}),
 });
+
+const notionStore = new JsonFile(path.join(DATA_DIR, 'notion.json'), {});
+await notionStore.load();
+const notion = createNotion({
+  token: env.NOTION_TOKEN, parent: env.NOTION_PAGE, store: notionStore,
+  timeZone: env.TIME_ZONE || Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Seoul',
+  loadState: () => Records.apply({}, db.live()),
+  ...(env.NOTION_TEST_BASE ? { apiBase: env.NOTION_TEST_BASE, minGapMs: 5 } : {}),
+});
+if (env.NOTION_PAGE && !notion.configured && env.NOTION_TOKEN) console.error('NOTION_PAGE 에서 페이지 ID 를 찾지 못했습니다. 노션 페이지 주소를 그대로 붙여넣으세요.');
 
 /* ---------- 세션 (HMAC 서명 쿠키) ---------- */
 const b64 = (buf) => Buffer.from(buf).toString('base64url');
@@ -152,6 +163,7 @@ const routes = {
       toss: { configured: toss.configured },
       google: { configured: google.configured, connected: google.connected(), connectedAt: secrets.value.google?.connectedAt || null },
       fatsecret: { configured: fatsecret.configured, connected: fatsecret.connected(), connectedAt: secrets.value.fatsecret?.connectedAt || null },
+      notion: notion.info(),
     } : undefined,
   }),
 
@@ -188,7 +200,9 @@ const routes = {
     const { cursor, changes } = await readJson(req);
     if (!Array.isArray(changes) || changes.length > 100000) throw new HttpError(400, '변경 목록 형식이 올바르지 않습니다.');
     try {
-      return db.sync(cursor, changes, Records.info);
+      const out = db.sync(cursor, changes, Records.info);
+      if (changes.length) notion.schedule(); // 바뀐 기록은 잠시 모았다가 노션에도 보냄
+      return out;
     } catch (e) {
       if (e instanceof RangeError) throw new HttpError(400, e.message);
       throw e;
@@ -249,6 +263,13 @@ const routes = {
     }
   },
   'POST /api/fatsecret/disconnect': async () => { await fatsecret.disconnect(); return { ok: true }; },
+  // 노션: 지금 보내기 (오래 걸릴 수 있어 바로 응답하고 뒤에서 진행)
+  'POST /api/notion/sync': async () => {
+    if (!notion.configured) throw new HttpError(409, '서버에 노션 설정이 없습니다 (server/.env 의 NOTION_TOKEN, NOTION_PAGE).');
+    notion.run().catch(() => {});
+    return notion.info();
+  },
+  'GET /api/notion/status': async () => notion.info(),
   'GET /api/fatsecret/diary': async (req, res, url) => fatsecret.diary({ from: url.searchParams.get('from'), to: url.searchParams.get('to') }),
 };
 // 외부에서 돌아오는 주소: 로그인 쿠키가 없으면 오류 대신 첫 화면으로 돌려보냄
@@ -283,5 +304,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`MY LIFE 서버: http://${HOST}:${PORT}  (공개 주소: ${BASE_URL})`);
   console.log(`  데이터: ${DATA_DIR} (기록 ${db.count()}건)`);
+  notion.start();
+  console.log(`  노션: ${notion.configured ? '설정됨 (기록이 바뀌면 자동으로 보냄)' : '미설정'}`);
   console.log(`  토스증권: ${toss.configured ? '설정됨' : '미설정'} · 구글 캘린더: ${google.configured ? (google.connected() ? '연결됨' : '설정됨(미연결)') : '미설정'} · 팻시크릿: ${fatsecret.configured ? (fatsecret.connected() ? '연결됨' : '설정됨(미연결)') : '미설정'}`);
 });

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
  * 연동 점검:  npm run check
- * server/.env 의 키로 토스증권에 실제로 조회해 보고 결과를 알려줍니다 (조회만 합니다).
+ * server/.env 의 키로 토스증권·노션에 실제로 연결해 보고 결과를 알려줍니다 (조회만 합니다).
  */
 import { createToss } from './lib/toss.mjs';
+import { createNotion } from './lib/notion.mjs';
 
 const env = process.env;
 const state = (on) => (on ? '키 입력됨' : '키 없음 (선택 사항)');
@@ -35,6 +36,24 @@ if (!toss.configured) {
     } else if (/fetch failed/.test(e.message)) {
       console.log('     인터넷 연결을 확인하세요.');
     }
+  }
+}
+
+console.log('\n[노션]');
+const notion = createNotion({ token: env.NOTION_TOKEN, parent: env.NOTION_PAGE, store: { value: {}, write: async () => {} }, loadState: () => ({}), apiBase: env.NOTION_TEST_BASE, log: {} });
+if (!env.NOTION_TOKEN) {
+  console.log('  키가 없습니다 (선택 사항). npm run setup 으로 토큰과 페이지 주소를 입력하세요.');
+} else if (!notion.configured) {
+  failed = true;
+  console.log('  ❌ NOTION_PAGE 에서 페이지를 찾지 못했습니다. 노션 페이지 링크를 그대로 붙여넣으세요.');
+} else {
+  try {
+    const r = await notion.check();
+    console.log(`  ✅ 연결 성공 — 연결 이름 "${r.bot}", 페이지 "${r.page}"`);
+    console.log('  서버를 켜면 이 페이지 아래에 표 5개를 만들고 기록을 자동으로 보냅니다.');
+  } catch (e) {
+    failed = true;
+    console.log(`  ❌ ${e.message}`);
   }
 }
 

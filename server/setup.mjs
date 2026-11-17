@@ -9,6 +9,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { parseEnv } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { pageIdFrom } from './lib/notion.mjs';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const ENV_FILE = path.join(DIR, '.env');
@@ -81,6 +82,22 @@ if (tossId) {
     set('TOSS_CLIENT_ID', tossId); set('TOSS_CLIENT_SECRET', tossSecret);
   } else console.log('   값이 비어 있거나 저장할 수 없는 문자가 있어 건너뜁니다.');
 }
+
+/* ---------- 3. 노션 (선택) ---------- */
+const hasNotion = !!(current.NOTION_TOKEN && current.NOTION_PAGE);
+console.log(`\n3) 노션 (선택)${hasNotion ? ' — 이미 입력되어 있습니다' : ''}`);
+console.log('   기록을 노션 표로 자동 정리합니다. 만드는 방법은 server/README.md 의 "노션 연결 준비"를 보세요.');
+const notionToken = await ask(`   노션 연결 토큰 (ntn_ 으로 시작, 화면에 보이지 않습니다) [Enter = ${hasNotion ? '그대로' : '건너뛰기'}]: `, { secret: true });
+if (notionToken) {
+  for (;;) {
+    const page = await ask('   표를 만들 노션 페이지 주소 (페이지에서 ··· → 링크 복사): ');
+    if (!page) { console.log('   페이지 주소가 없어 노션은 건너뜁니다.'); break; }
+    if (!pageIdFrom(page)) { console.log('   주소에서 페이지를 찾지 못했습니다. 노션 페이지의 링크를 그대로 붙여넣으세요.'); continue; }
+    if (line('NOTION_TOKEN', notionToken) && line('NOTION_PAGE', page)) { set('NOTION_TOKEN', notionToken); set('NOTION_PAGE', page); }
+    else console.log('   저장할 수 없는 문자가 있어 건너뜁니다.');
+    break;
+  }
+}
 rl.close();
 
 /* ---------- 저장 + 확인 ---------- */
@@ -99,6 +116,7 @@ if (saved.TOSS_CLIENT_ID && saved.TOSS_CLIENT_SECRET) {
     : '   이 컴퓨터의 공인 IP(https://ifconfig.me 에서 확인)를 토스증권 Open API 설정의 "허용 IP" 에 등록한 뒤, 아래 명령으로 연결을 확인하세요.');
   console.log('     npm run check');
 }
+if (saved.NOTION_TOKEN && saved.NOTION_PAGE) console.log('\n노션: 아래 명령으로 연결을 확인하세요 (토스 확인과 함께 나옵니다).\n     npm run check');
 console.log('\n이제 서버를 켜세요:');
 console.log('     npm start');
 console.log(`   그다음 브라우저에서 ${saved.BASE_URL || 'http://localhost:8787'} 을 열고 방금 정한 비밀번호로 로그인합니다.\n`);

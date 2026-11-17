@@ -34,6 +34,7 @@ export function openDb(file, { backupDir = null, backupEveryMs = 60 * 60 * 1000,
     ON CONFLICT(k) DO UPDATE SET kind = excluded.kind, date = excluded.date, v = excluded.v, deleted = excluded.deleted, seq = excluded.seq, updated_at = excluded.updated_at`);
   const countLive = db.prepare('SELECT COUNT(*) AS n FROM records WHERE deleted = 0');
   const countAll = db.prepare('SELECT COUNT(*) AS n FROM records');
+  const allLive = db.prepare('SELECT k, v FROM records WHERE deleted = 0');
 
   let lastBackup = 0;
   const seq = () => Number(getSeq.get()?.value || 0);
@@ -91,5 +92,8 @@ export function openDb(file, { backupDir = null, backupEveryMs = 60 * 60 * 1000,
     }
   }
 
-  return { sync, write, seq, count: () => countLive.get().n, isEmpty: () => countAll.get().n === 0 };
+  // 지금 살아 있는 기록 전체 (노션 보내기 등 서버 쪽 계산용)
+  const live = () => allLive.all().map((r) => ({ k: r.k, v: JSON.parse(r.v) }));
+
+  return { sync, write, seq, live, count: () => countLive.get().n, isEmpty: () => countAll.get().n === 0 };
 }
