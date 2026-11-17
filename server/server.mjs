@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * MY LIFE 통합 서버 (의존성 없음, Node 18+)
+ * MY LIFE 통합 서버 (의존성 없음, Node 22.13+)
  *  - 웹사이트 제공 + 비밀번호 로그인
- *  - 모든 기기 데이터 동기화 (JSON 파일 저장 + 시간별 백업)
- *  - 토스증권 조회 / 구글 캘린더 연동
+ *  - 모든 기기 데이터 동기화 (SQLite 에 기록 단위로 저장 + 시간별 백업)
+ *  - 토스증권 조회 / 구글 캘린더 / 팻시크릿(식단·체중) 연동
  *
- * 실행:  node --env-file=server/.env server/server.mjs
+ * 실행:  npm start
  * 설정값은 server/.env.example 참고
  */
 import http from 'node:http';
@@ -18,6 +18,7 @@ import { openDb } from './lib/db.mjs';
 import Records from '../js/records.js';
 import { createToss, HttpError } from './lib/toss.mjs';
 import { createGoogle } from './lib/google.mjs';
+import { createFatsecret } from './lib/fatsecret.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const env = process.env;
@@ -36,7 +37,7 @@ if (!env.APP_PASSWORD || env.APP_PASSWORD.length < 8) {
 
 /* ---------- 저장소 ---------- */
 const db = openDb(path.join(DATA_DIR, 'mylife.db'), { backupDir: path.join(DATA_DIR, 'backups') });
-const secrets = new JsonFile(path.join(DATA_DIR, 'secrets.json'), { sessionKey: null, google: null });
+const secrets = new JsonFile(path.join(DATA_DIR, 'secrets.json'), { sessionKey: null, google: null, fatsecret: null });
 await secrets.load();
 
 // 이전 버전(db.json 한 문서)에서 올라온 경우: 기록 단위로 풀어서 옮김
@@ -62,6 +63,12 @@ const google = createGoogle({
   clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET,
   redirectUri: `${BASE_URL}/api/google/callback`, secrets,
   ...(env.GOOGLE_TEST_BASE ? { authBase: env.GOOGLE_TEST_BASE, tokenBase: env.GOOGLE_TEST_BASE, apiBase: env.GOOGLE_TEST_BASE } : {}),
+});
+
+const fatsecret = createFatsecret({
+  consumerKey: env.FATSECRET_CONSUMER_KEY, consumerSecret: env.FATSECRET_CONSUMER_SECRET,
+  callbackUrl: `${BASE_URL}/api/fatsecret/callback`, secrets,
+  ...(env.FATSECRET_TEST_BASE ? { authBase: env.FATSECRET_TEST_BASE, apiBase: env.FATSECRET_TEST_BASE } : {}),
 });
 
 /* ---------- 세션 (HMAC 서명 쿠키) ---------- */
@@ -144,6 +151,7 @@ const routes = {
     integrations: isAuthed(req) ? {
       toss: { configured: toss.configured },
       google: { configured: google.configured, connected: google.connected(), connectedAt: secrets.value.google?.connectedAt || null },
+      fatsecret: { configured: fatsecret.configured, connected: fatsecret.connected(), connectedAt: secrets.value.fatsecret?.connectedAt || null },
     } : undefined,
   }),
 
@@ -224,8 +232,28 @@ const routes = {
     const { calendarId, event } = await readJson(req, 64 * 1024);
     return google.createEvent({ calendarId, event });
   },
+
+  'GET /api/fatsecret/connect': async (req, res) => {
+    if (!fatsecret.configured) throw new HttpError(409, '서버에 팻시크릿 키가 설정되지 않았습니다.');
+    return { url: await fatsecret.connectUrl() };
+  },
+  'GET /api/fatsecret/callback': async (req, res, url) => {
+    const token = url.searchParams.get('oauth_token'), verifier = url.searchParams.get('oauth_verifier');
+    if (!token || !verifier) return redirect(res, '/?fatsecret=denied#me');
+    try {
+      await fatsecret.exchange(token, verifier);
+      redirect(res, '/?fatsecret=connected#me');
+    } catch (e) {
+      console.error('fatsecret callback', e.message);
+      redirect(res, '/?fatsecret=error#me');
+    }
+  },
+  'POST /api/fatsecret/disconnect': async () => { await fatsecret.disconnect(); return { ok: true }; },
+  'GET /api/fatsecret/diary': async (req, res, url) => fatsecret.diary({ from: url.searchParams.get('from'), to: url.searchParams.get('to') }),
 };
-const PUBLIC = new Set(['GET /api/session', 'POST /api/login', 'GET /api/google/callback']);
+// 외부에서 돌아오는 주소: 로그인 쿠키가 없으면 오류 대신 첫 화면으로 돌려보냄
+const CALLBACKS = { 'GET /api/google/callback': 'google', 'GET /api/fatsecret/callback': 'fatsecret' };
+const PUBLIC = new Set(['GET /api/session', 'POST /api/login', ...Object.keys(CALLBACKS)]);
 
 /* ---------- 서버 ---------- */
 const server = http.createServer(async (req, res) => {
@@ -238,7 +266,7 @@ const server = http.createServer(async (req, res) => {
       // CSRF 방지: 상태를 바꾸는 요청은 커스텀 헤더 필수 (다른 사이트에서는 붙일 수 없음)
       if (req.method !== 'GET' && req.headers['x-mylife'] !== '1') throw new HttpError(403, '잘못된 요청입니다.');
       if (!PUBLIC.has(key) && !isAuthed(req)) throw new HttpError(401, '로그인이 필요합니다.');
-      if (key === 'GET /api/google/callback' && !isAuthed(req)) return redirect(res, '/?google=error#me');
+      if (CALLBACKS[key] && !isAuthed(req)) return redirect(res, `/?${CALLBACKS[key]}=error#me`);
       const out = await handler(req, res, url);
       if (!res.headersSent && out !== undefined) json(res, 200, out);
       return;
@@ -255,5 +283,5 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`MY LIFE 서버: http://${HOST}:${PORT}  (공개 주소: ${BASE_URL})`);
   console.log(`  데이터: ${DATA_DIR} (기록 ${db.count()}건)`);
-  console.log(`  토스증권: ${toss.configured ? '설정됨' : '미설정'} · 구글 캘린더: ${google.configured ? (google.connected() ? '연결됨' : '설정됨(미연결)') : '미설정'}`);
+  console.log(`  토스증권: ${toss.configured ? '설정됨' : '미설정'} · 구글 캘린더: ${google.configured ? (google.connected() ? '연결됨' : '설정됨(미연결)') : '미설정'} · 팻시크릿: ${fatsecret.configured ? (fatsecret.connected() ? '연결됨' : '설정됨(미연결)') : '미설정'}`);
 });

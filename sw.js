@@ -1,5 +1,5 @@
 // 오프라인에서도 화면이 열리도록 정적 파일만 캐시 (API 는 절대 캐시하지 않음)
-const CACHE = 'mylife-v4';
+const CACHE = 'mylife-v5';
 const SHELL = ['./', 'index.html', 'fonts/pretendard/pretendard.css', 'css/style.css', 'js/records.js', 'js/saju.js', 'js/app.js', 'js/stats.js', 'js/charts.js', 'js/views.js', 'js/sync.js', 'js/integrations.js', 'manifest.webmanifest', 'icons/icon.svg'];
 
 self.addEventListener('install', (e) => {

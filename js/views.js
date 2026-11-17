@@ -12,7 +12,7 @@ const ui = {
   q: '', qType: 'all', tlPage: 1,
   sheetDate: null,
 };
-const METRIC_COLOR = { mood: 'var(--primary)', energy: 'var(--c-finance)', sleep: 'var(--c-etc)', steps: 'var(--success)', exercise: 'var(--success)', weight: 'var(--text-2)', habit: 'var(--success)' };
+const METRIC_COLOR = { mood: 'var(--primary)', energy: 'var(--c-finance)', sleep: 'var(--c-etc)', steps: 'var(--success)', exercise: 'var(--success)', weight: 'var(--text-2)', kcal: 'var(--c-finance)', habit: 'var(--success)' };
 const fmtDateFull = (s) => { const d = parseYmd(s); return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEK[d.getDay()]})`; };
 const snippet = (t, n = 70) => (t.length > n ? t.slice(0, n) + '…' : t);
 const emptyLi = (text) => `<li class="empty">${text}</li>`;
@@ -157,7 +157,7 @@ function renderRecall() {
         <div class="grow"><div class="sub">${fmtDateFull(d)}</div>
           ${text ? `<div class="about">${esc(snippet(text, 140))}</div>` : ''}
           ${evs.length ? `<div class="sub">일정: ${esc(evs.map((e) => e.title).join(', '))}</div>` : ''}
-          ${!text && log ? `<div class="sub">${['sleep', 'steps', 'exercise'].filter((k) => log[k] != null).map((k) => `${METRICS[k].label} ${fmtMetric(k, log[k])}`).join(' · ')}</div>` : ''}
+          ${!text && log ? `<div class="sub">${['sleep', 'steps', 'exercise', 'kcal'].filter((k) => log[k] != null).map((k) => `${METRICS[k].label} ${fmtMetric(k, log[k])}`).join(' · ')}</div>` : ''}
         </div></div>`;
     return;
   }
@@ -178,9 +178,11 @@ function renderDay() {
   const d = selectedDate, log = state.logs[d] || {}, evs = eventsOn(d);
   const future = d > todayStr();
   const snap = snapshotSeries(100000).find((s) => s.date === d);
-  const chips = ['mood', 'energy', 'sleep', 'steps', 'exercise', 'weight'].filter((k) => log[k] != null).map((k) => (k === 'mood'
+  const chips = ['mood', 'energy', 'sleep', 'steps', 'exercise', 'weight', 'kcal'].filter((k) => log[k] != null).map((k) => (k === 'mood'
     ? `<span class="chip-m big">${MOOD_EMOJI[log.mood]} ${MOOD_LABEL[log.mood]}</span>`
     : `<span class="chip-m"><small>${METRICS[k].label}</small>${k === 'energy' ? log[k] + '/5' : fmtMetric(k, log[k])}</span>`));
+  const macros = [['carb', '탄'], ['protein', '단'], ['fat', '지']].filter(([k]) => log[k] != null).map(([k, l]) => `${l} ${Math.round(log[k])}g`);
+  if (macros.length) chips.push(`<span class="chip-m"><small>탄단지</small>${macros.join(' · ')}</span>`);
   $('#day-card').innerHTML = `
     <div class="card-head"><h2>${fmtDateFull(d)}</h2>
       ${future ? '' : `<button class="btn ghost small" data-checkin="${d}">${ico(Object.keys(log).length ? 'edit' : 'plus')}${Object.keys(log).length ? '수정' : '기록하기'}</button>`}</div>
@@ -211,6 +213,7 @@ function renderTimeline() {
       x.log.sleep != null && `수면 ${fmtMetric('sleep', x.log.sleep)}`,
       x.log.steps != null && `${fmtMetric('steps', x.log.steps)}`,
       x.log.exercise ? `운동 ${fmtMetric('exercise', x.log.exercise)}` : '',
+      x.log.kcal != null && `섭취 ${fmtMetric('kcal', x.log.kcal)}`,
       state.habits.length && done ? `습관 ${done}/${state.habits.length}` : '',
       x.evs.length ? `일정 ${x.evs.length}` : '',
     ].filter(Boolean).join(' · ');
@@ -237,10 +240,10 @@ function exportCsv() {
   const snaps = Object.fromEntries(snapshotSeries(100000).map((s) => [s.date, s.v]));
   const safe = (t) => (/^[=+\-@]/.test(t) ? "'" + t : t); // 스프레드시트 수식으로 해석되지 않게
   const cell = (v) => { v = v == null ? '' : String(v); return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-  const rows = [['날짜', '기분', '에너지', '수면(시간)', '걸음', '운동(분)', '체중(kg)', '습관', '감사한 일', '일기', '일정', '자산']];
+  const rows = [['날짜', '기분', '에너지', '수면(시간)', '걸음', '운동(분)', '체중(kg)', '섭취(kcal)', '탄수화물(g)', '단백질(g)', '지방(g)', '습관', '감사한 일', '일기', '일정', '자산']];
   for (const d of dates) {
     const l = state.logs[d] || {};
-    rows.push([d, l.mood, l.energy, l.sleep, l.steps, l.exercise, l.weight,
+    rows.push([d, l.mood, l.energy, l.sleep, l.steps, l.exercise, l.weight, l.kcal, l.carb, l.protein, l.fat,
       safe(state.habits.filter((h) => isChecked(d, h.id)).map((h) => h.name).join(' / ')),
       safe(l.grateful || ''), safe(l.note || ''), safe(eventsOn(d).map((e) => e.title).join(' / ')), snaps[d] ?? '']);
   }

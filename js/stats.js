@@ -15,6 +15,7 @@ const METRICS = {
   steps: { label: '걸음', subj: '걸음 수가', unit: '보', digits: 0 },
   exercise: { label: '운동', subj: '운동 시간이', unit: '분', digits: 0 },
   weight: { label: '체중', subj: '체중이', unit: 'kg', digits: 1 },
+  kcal: { label: '섭취', subj: '섭취 칼로리가', unit: 'kcal', digits: 0 },
   habit: { label: '습관 달성률', subj: '습관 달성률이', unit: '%', digits: 0, min: 0, max: 100 },
 };
 function fmtMetric(key, v, withUnit = true) {

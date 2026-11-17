@@ -14,7 +14,7 @@ const defaultState = () => ({
   sajuNote: '',
   habits: [],        // {id, name, icon, target(주 n회)}
   habitChecks: {},   // 'YYYY-MM-DD' -> [habitId]
-  logs: {},          // 'YYYY-MM-DD' -> {mood, energy, sleep, exercise, weight, grateful, note}
+  logs: {},          // 'YYYY-MM-DD' -> {mood, energy, sleep, steps, exercise, weight, kcal, carb, protein, fat, grateful, note}
   goals: [],         // {id, title, area, due, progress, linkHabit, linkTarget, since}
   snapshots: {},     // 'YYYY-MM-DD' -> {v, c, cur}  날짜별 자산 스냅샷
   reviews: {},       // 주의 월요일 'YYYY-MM-DD' -> {note}

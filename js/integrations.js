@@ -1,6 +1,6 @@
 'use strict';
 /* =========================================================
- * 외부 연동: 토스증권 · 구글 캘린더 (통합 서버 경유) · 삼성헬스 (CSV)
+ * 외부 연동: 토스증권 · 구글 캘린더 · 팻시크릿 (통합 서버 경유) · 삼성헬스 (CSV)
  * 로드 순서: app.js → sync.js → integrations.js
  * ========================================================= */
 const timeAgo = (iso) => {
@@ -125,6 +125,65 @@ async function disconnectGoogle() {
 }
 
 /* =========================================================
+ * 팻시크릿: 식단(섭취 칼로리·탄단지)과 체중을 날짜별 기록으로
+ * ========================================================= */
+let fsBusy = false, fsError = '', fsQueued = 0; // fsQueued: 가져오는 중에 들어온 더 긴 기간 요청
+const FS_FOOD = ['kcal', 'carb', 'protein', 'fat'];
+const fsConnected = () => isServer() && !!Cloud.integrations.fatsecret?.connected;
+
+async function connectFatsecret() {
+  try {
+    const { url } = await api('/api/fatsecret/connect');
+    location.href = url;
+  } catch (e) { toast(e.message); }
+}
+
+// months: 이번 달을 포함해 몇 달 치를 가져올지
+async function syncFatsecret({ silent = false, months = 3 } = {}) {
+  if (!fsConnected()) { if (!silent) toast(isServer() ? '나 > 연동 · 설정에서 팻시크릿을 먼저 연결하세요' : LOCAL_ONLY_MSG); return; }
+  if (fsBusy) { if (!silent) fsQueued = Math.max(fsQueued, months); return; }
+  fsBusy = true; fsError = ''; updateIntegrationUI();
+  try {
+    const now = new Date();
+    const q = new URLSearchParams({ from: ymd(new Date(now.getFullYear(), now.getMonth() - (months - 1), 1)), to: todayStr() });
+    const d = await api('/api/fatsecret/diary?' + q);
+    // 식단 값은 팻시크릿이 원본: 가져온 기간 안에서 팻시크릿에 없는 날의 식단 값은 지움 (체중·다른 기록은 그대로)
+    for (const [date, log] of Object.entries(state.logs)) {
+      if (date < d.from || date > d.to || d.days[date]?.kcal != null || !FS_FOOD.some((f) => log[f] != null)) continue;
+      for (const f of FS_FOOD) delete log[f];
+      if (!Object.keys(log).length) delete state.logs[date];
+    }
+    let food = 0, weight = 0;
+    for (const [date, v] of Object.entries(d.days)) {
+      const patch = Object.fromEntries(Object.entries(v).filter(([, x]) => x != null));
+      if (!Object.keys(patch).length) continue;
+      state.logs[date] = { ...state.logs[date], ...patch };
+      if (patch.kcal != null) food++;
+      if (patch.weight != null) weight++;
+    }
+    meta().fatsecretAt = d.fetchedAt;
+    save();
+    if (!silent) toast(`팻시크릿에서 식단 ${food}일, 체중 ${weight}일을 가져왔습니다`);
+  } catch (e) {
+    fsError = e.message;
+    if (e.status === 409) { fsError = ''; await refreshSession().catch(() => {}); }
+    if (!silent || e.status === 409) toast(e.message);
+  } finally {
+    fsBusy = false;
+    const again = fsQueued; fsQueued = 0;
+    if (again && fsConnected() && !fsError) syncFatsecret({ months: again }); else render();
+  }
+}
+
+async function disconnectFatsecret() {
+  if (!confirm('팻시크릿 연결을 해제할까요? 이미 가져온 식단·체중 기록은 남아 있습니다.')) return;
+  await api('/api/fatsecret/disconnect', { method: 'POST' });
+  await refreshSession();
+  toast('팻시크릿 연결을 해제했습니다');
+  render();
+}
+
+/* =========================================================
  * 삼성헬스 CSV 가져오기
  * 파일 예: com.samsung.shealth.sleep.<시각>.csv
  *  1행 메타데이터, 2행 헤더(접두사 포함), 3행~ 데이터. 시각은 UTC + time_offset(예: UTC+0900)
@@ -244,6 +303,12 @@ function connections() {
         : gBusy ? '가져오는 중…' : `연결됨${meta().gcalAt ? ' · ' + timeAgo(meta().gcalAt) : ''}`,
     },
     {
+      id: 'fatsecret', icon: 'food', name: '팻시크릿',
+      ok: fsConnected() && !fsError,
+      text: !server ? '서버 필요' : !ig.fatsecret?.configured ? '서버에 키 미설정' : !ig.fatsecret.connected ? '연결 안 됨'
+        : fsBusy ? '가져오는 중…' : fsError ? '⚠️ ' + fsError : `연결됨${meta().fatsecretAt ? ' · ' + timeAgo(meta().fatsecretAt) : ''}`,
+    },
+    {
       id: 'samsung', icon: 'heart', name: '삼성헬스',
       ok: !!meta().samsungAt,
       text: meta().samsungAt ? `CSV 가져옴 · ${timeAgo(meta().samsungAt)}` : 'CSV로 가져오기',
@@ -270,6 +335,9 @@ function renderIntegPanel() {
     google: !server || !ig.google?.configured ? ''
       : ig.google.connected ? '<button class="btn small" data-act="gsync">지금 가져오기</button><button class="btn ghost small" data-act="gdisconnect">연결 해제</button>'
       : '<button class="btn small" data-act="gconnect">구글 계정 연결</button>',
+    fatsecret: !server || !ig.fatsecret?.configured ? ''
+      : ig.fatsecret.connected ? '<button class="btn small" data-act="fsync">지금 가져오기</button><button class="btn ghost small" data-act="fdisconnect">연결 해제</button>'
+      : '<button class="btn small" data-act="fconnect">팻시크릿 계정 연결</button>',
     samsung: '<label class="btn ghost small" for="sh-files">CSV 가져오기</label>',
   };
   el.innerHTML = connections().map((c) => `
@@ -278,7 +346,7 @@ function renderIntegPanel() {
       <div class="grow"><strong>${esc(c.name)}</strong> <span class="dot-status ${c.ok ? 'ok' : ''}"></span><div class="sub">${esc(c.text)}</div></div>
       <div class="integ-actions">${actions[c.id]}</div>
     </div>`).join('') +
-    (Cloud.mode === 'local' ? `<div class="notice">지금은 <strong>이 기기에만</strong> 저장됩니다. 통합 서버(<code>server/server.mjs</code>)로 실행하면 휴대폰·PC 데이터가 하나로 동기화되고 토스증권·구글 캘린더가 자동으로 연결됩니다.</div>` : '');
+    (Cloud.mode === 'local' ? `<div class="notice">지금은 <strong>이 기기에만</strong> 저장됩니다. 통합 서버(<code>server/server.mjs</code>)로 실행하면 휴대폰·PC 데이터가 하나로 동기화되고 토스증권·구글 캘린더·팻시크릿이 자동으로 연결됩니다.</div>` : '');
   $('#gcal-id-row').hidden = !gConnected();
   $('#set-gcal-id').value = state.settings.googleCalendarId || 'primary';
   $('#set-usdkrw').value = state.settings.usdKrw ?? '';
@@ -292,6 +360,9 @@ $('#integ-panel').addEventListener('click', (ev) => {
   if (act === 'gsync') syncGoogle();
   if (act === 'gdisconnect') disconnectGoogle().catch((e) => toast(e.message));
   if (act === 'gconnect') location.href = '/api/google/connect';
+  if (act === 'fconnect') connectFatsecret();
+  if (act === 'fsync') syncFatsecret();
+  if (act === 'fdisconnect') disconnectFatsecret().catch((e) => toast(e.message));
 });
 $('#integ-extra').addEventListener('submit', (ev) => {
   ev.preventDefault();
@@ -335,6 +406,7 @@ function autoRefresh() {
   const active = document.querySelector('.view.active')?.id;
   if ((active === 'view-stocks' || active === 'view-dashboard') && tossReady() && !tossBusy && !tossError && stale(state.toss?.fetchedAt, 10)) syncToss({ silent: true });
   if ((active === 'view-records' || active === 'view-dashboard') && gConnected() && !gBusy && stale(meta().gcalAt, 15)) syncGoogle({ silent: true });
+  if (active !== 'view-stocks' && fsConnected() && !fsBusy && !fsError && stale(meta().fatsecretAt, 60)) syncFatsecret({ silent: true, months: 2 });
 }
 
 const baseRender = render;
@@ -350,6 +422,14 @@ document.addEventListener('cloud:ready', () => {
   if (g) {
     toast({ connected: '구글 캘린더가 연결되었습니다', denied: '구글 연결을 취소했습니다', error: '구글 연결에 실패했습니다. 다시 시도하세요' }[g] || '');
     history.replaceState(null, '', location.pathname + location.hash);
+  }
+  // 팻시크릿 연결 후 돌아왔을 때: 지난 1년 치를 한 번에 가져옴
+  const f = new URLSearchParams(location.search).get('fatsecret');
+  if (f) {
+    toast({ connected: '팻시크릿이 연결되었습니다. 지난 1년 기록을 가져오는 중…', denied: '팻시크릿 연결을 취소했습니다', error: '팻시크릿 연결에 실패했습니다. 다시 시도하세요' }[f] || '');
+    history.replaceState(null, '', location.pathname + location.hash);
+    ui.meTab = 'settings';
+    if (f === 'connected' && fsConnected()) syncFatsecret({ months: 12 });
   }
   render();
 });

@@ -308,6 +308,7 @@ input[type=range] { padding: 0; border: 0; min-height: 0; background: none; box-
 
 .conn-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
 @media (max-width: 860px) { .conn-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; } }
+@media (min-width: 861px) { .conn-row { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); } }
 .conn-chip {
   display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; align-items: center; text-align: left;
   padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
@@ -533,6 +534,7 @@ label.search { flex: 1; min-width: 200px; flex-direction: row; align-items: cent
 .today-top .avatar { width: 56px; height: 56px; flex-basis: 56px; font-size: 30px; border-radius: 18px; }
 .today-top h2 { font-size: 22px; margin: 0; }
 .greeting { font-size: 13px; color: var(--muted); }
+.today-top .grow { min-width: 150px; }
 .rings { display: flex; gap: 14px; }
 .ring { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: var(--muted); font-weight: 500; }
 .ring text { font-size: 12px; font-weight: 700; fill: var(--text); }
